@@ -2,9 +2,8 @@
 
 import sys
 from argparse import ArgumentParser
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas
 import requests
 from pydantic_settings import CliApp, CliSettingsSource
 
@@ -12,15 +11,18 @@ from lib.io_utils import latest_file_matching_format_pattern, read_dataframe_pic
 from lib.tpg_utils import print_round
 from settings import Settings
 
+if TYPE_CHECKING:
+	import pandas
 
-def print_user_rounds_by_score(user_scores: pandas.DataFrame, sesh: requests.Session | None = None):
+
+def print_user_rounds_by_score(user_scores: 'pandas.DataFrame', sesh: requests.Session | None = None):
 	row: Any  # bleh, pyright does not understand itertuples
 	for n, row in enumerate(user_scores.itertuples(), 1):
 		print_round(n, row, sesh)
 
 
 def print_theoretical_best_user_rounds(
-	user_best: pandas.DataFrame, sesh: requests.Session | None = None, amount: int = 10
+	user_best: 'pandas.DataFrame', sesh: requests.Session | None = None, amount: int = 10
 ):
 	for n, row in enumerate(
 		user_best.sort_values('score', ascending=False).head(amount).itertuples(), 1
