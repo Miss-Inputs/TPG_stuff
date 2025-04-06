@@ -3,6 +3,7 @@
 import geopandas
 import pandas
 
+from lib.io_utils import format_path
 from lib.tastycheese_map import get_tpg_rounds
 from settings import Settings
 
@@ -18,9 +19,7 @@ def main() -> None:
 	print(gdf)
 
 	if settings.rounds_path:
-		output_path = settings.rounds_path.with_stem(
-			settings.rounds_path.stem.format(gdf['number'].max())
-		)
+		output_path = format_path(settings.rounds_path, gdf['number'].max())
 		gdf.to_file(output_path)
 
 

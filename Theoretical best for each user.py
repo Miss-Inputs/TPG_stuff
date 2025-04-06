@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from tqdm.contrib.concurrent import process_map
 
 from lib.geo_utils import haversine_distance
-from lib.io_utils import latest_file_matching_format_pattern, read_dataframe_pickle
+from lib.io_utils import format_path, latest_file_matching_format_pattern, read_dataframe_pickle
 from lib.tastycheese_map import get_tpg_rounds
 from lib.tpg_utils import tpg_score
 from settings import Settings
@@ -63,25 +63,17 @@ def _get_new_round_rows(
 	return rows
 
 
-def main() -> None:
-	settings = Settings()
-	if not settings.submissions_path:
-		raise RuntimeError('Need submissions_path, run All TPG submissions.py first')
-
-	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.pickle'))
-	df = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
-	df['username'] = df['username'].combine_first(df['name'])
-	print(df)
+def get_theoretical_best_submissions(submissions: pandas.DataFrame):
+	submissions['username'] = submissions['username'].combine_first(submissions['name'])
 
 	rounds = {r.number: (r.country, r.latitude, r.longitude) for r in get_tpg_rounds()}
-	df['country'], df['target_lat'], df['target_lng'] = zip(
-		*df['round'].apply(lambda round_num: rounds[int(round_num)]), strict=True
+	submissions['country'], submissions['target_lat'], submissions['target_lng'] = zip(
+		*submissions['round'].apply(lambda round_num: rounds[int(round_num)]), strict=True
 	)
 	pics_per_user = {
 		username: group[['latitude', 'longitude']].drop_duplicates()
-		for username, group in df.groupby('username', sort=False)
+		for username, group in submissions.groupby('username', sort=False)
 	}
-	orig_placement = {(row.round, row.username): row.place for row in df.itertuples()}
 
 	rows = list(
 		itertools.chain.from_iterable(
@@ -100,8 +92,20 @@ def main() -> None:
 		)
 	)
 
-	df = pandas.DataFrame(rows)
-	for _, round_group in df.groupby('round', as_index=False, sort=False, group_keys=False):
+	return pandas.DataFrame(rows)
+
+
+def main() -> None:
+	settings = Settings()
+	if not settings.submissions_path:
+		raise RuntimeError('Need submissions_path, run All TPG submissions.py first')
+
+	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.pickle'))
+	submissions = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
+
+	new_subs = get_theoretical_best_submissions(submissions)
+
+	for _, round_group in new_subs.groupby('round', as_index=False, sort=False, group_keys=False):
 		round_scores = tpg_score(round_group['distance'] / 1000)
 		round_results = pandas.DataFrame(
 			{
@@ -110,20 +114,17 @@ def main() -> None:
 			}
 		)
 		round_results['total_subs'] = round_group.index.size
-		df.update(round_results)
-	df = df.astype({'place': int, 'total_subs': int})
-	df['orig_placement'] = df.apply(
+		new_subs.update(round_results)
+	new_subs = new_subs.astype({'place': int, 'total_subs': int})
+	orig_placement = {(row.round, row.username): row.place for row in submissions.itertuples()}
+	new_subs['orig_placement'] = new_subs.apply(
 		lambda row: orig_placement.get((row['round'], row['username'])),  # type: ignore[overload] #what? Are you stupid
 		axis='columns',
 	)
-	print(df)
-	print(df[df['round'] == 177].sort_values('distance'))
 	if settings.theoretical_best_path:
-		output_path = settings.theoretical_best_path.with_stem(
-			settings.theoretical_best_path.stem.format(max(rounds))
-		)
-		df.to_pickle(output_path)
-		df.to_csv(output_path.with_suffix('.csv'), index=False)
+		output_path = format_path(settings.theoretical_best_path, new_subs['round'].max())
+		new_subs.to_pickle(output_path)
+		new_subs.to_csv(output_path.with_suffix('.csv'), index=False)
 
 
 if __name__ == '__main__':

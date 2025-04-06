@@ -3,7 +3,7 @@
 import geopandas
 import pandas
 
-from lib.io_utils import latest_file_matching_format_pattern
+from lib.io_utils import format_path, latest_file_matching_format_pattern
 from lib.tastycheese_map import load_or_get_submissions
 from settings import Settings
 
@@ -34,9 +34,7 @@ def main() -> None:
 	df = pandas.DataFrame(rows)
 
 	if settings.submissions_path:
-		path = settings.submissions_path.with_stem(
-			settings.submissions_path.stem.format(df['round'].max())
-		)
+		path = format_path(settings.submissions_path, df['round'].max())
 		df.to_pickle(path.with_suffix('.pickle'))
 	else:
 		path = None
