@@ -1,0 +1,7 @@
+geopandas
+shapely
+python-dotenv
+pydantic-settings
+requests
+tqdm
+sklearn
