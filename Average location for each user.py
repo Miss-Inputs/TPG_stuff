@@ -12,9 +12,13 @@ def _circular_mean_group(points: geopandas.GeoDataFrame):
 
 
 def get_average_by_user(submissions: geopandas.GeoDataFrame):
-	centroids = submissions.groupby('name')['geometry'].agg(_circular_mean_group)
+	grouper = submissions.groupby('name')
+	centroids = grouper['geometry'].agg(_circular_mean_group)
 	centroids = centroids.reset_index()
-	assert isinstance(centroids, geopandas.GeoDataFrame)
+	centroids = centroids.merge(
+		grouper.size().rename('count'), how='left', left_on='name', right_index=True
+	)
+	assert isinstance(centroids, geopandas.GeoDataFrame), type(centroids)
 	return centroids.set_crs('wgs84')
 
 
@@ -32,17 +36,9 @@ def main() -> None:
 	if settings.average_per_user_path:
 		output_path = format_path(settings.average_per_user_path, submissions['latest_round'].max())
 		centroids.to_file(output_path)
-
-	# Test: Between Wairiki on Taveuni Island in Fiji, and Bourma on the other side (+ a bit south). Should be somewhere in the middle!
-	# yeah nah that looks alright mate
-	# print(
-	# 	circular_mean_points(
-	# 		[
-	# 			shapely.Point(179.99220627435636, -16.8084711158926),
-	# 			shapely.Point(-179.87360486980262, -16.82108453972491),
-	# 		]
-	# 	)
-	# )
+		centroids[centroids['count'] > 1].to_file(
+			output_path.with_stem(f'{output_path.stem} (only multiple submissions)')
+		)
 
 
 if __name__ == '__main__':
