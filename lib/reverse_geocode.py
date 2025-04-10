@@ -1,6 +1,7 @@
 from functools import cache
 from typing import Any, Literal
 
+import pydantic_core
 import requests
 from pydantic import BaseModel
 
@@ -39,7 +40,9 @@ class NominatimGeocoding(BaseModel, extra='allow'):
 	query: Literal['']
 
 
-class NominatimGeocodingProperties(BaseModel, extra='forbid'):
+class NominatimGeocodingProperties(BaseModel, extra='allow'):
+	"""Could have basically anything in it"""
+
 	place_id: int
 	osm_type: str
 	osm_id: int
@@ -48,13 +51,14 @@ class NominatimGeocodingProperties(BaseModel, extra='forbid'):
 	osm_type: str
 	accuracy: int
 	label: str
-	name: str
-	postcode: str
-	street: str
-	district: str
-	city: str
-	state: str
-	country: str
+	name: str | None = None
+	postcode: str | None = None
+	street: str | None = None
+	district: str | None = None
+	city: str | None = None
+	state: str | None = None
+	country: str | None = None
+	"""Should _usually_ be there unless you're in a strange location (e.g. Antarctica)"""
 	admin: dict[str, str]
 	"""keys: level9, level7, level4, etc"""
 
@@ -77,12 +81,13 @@ class NominatimReverseGeocodeJSON(BaseModel, extra='allow'):
 	geocoding: NominatimGeocoding
 	features: list[NominatimFeature]
 
+
 @cache
 def reverse_geocode_address(
 	lat: float, lng: float, session: requests.Session | None = None, timeout: int = 10
 ) -> str | None:
 	"""Finds an address for a point using synchronous requests.
-	
+
 	Arguments:
 		lat: Latitude of point in WGS84.
 		lng: Longitude of point in WGS84.
@@ -100,15 +105,19 @@ def reverse_geocode_address(
 	response.raise_for_status()
 	content = response.content
 	if content == b'{"error":"Unable to geocode"}':
-		#TODO: Hmm I could do that a lot better surely, I just don't want to unnecessarily parse JSON twice
+		# TODO: Hmm I could do that a lot better surely, I just don't want to unnecessarily parse JSON twice
 		return None
 	return NominatimReverseJSONv2.model_validate_json(content).display_name
 
 
 def reverse_geocode_components(
 	lat: float, lng: float, session: requests.Session | None = None, timeout: int = 10
-) -> NominatimReverseJSONv2:
-	"""Not using this just yet, so it might not actually work. Just here if I ever feel like individual address components"""
+) -> NominatimReverseGeocodeJSON | None:
+	"""Returns individual address components instead of just a string.
+
+	Raises:
+		RuntimeError: If some weird error happens that isn't just 'unable to geocode'
+	"""
 	get = session.get if session else requests.get
 	url = 'https://nominatim.geocoding.ai/reverse'
 	params = {'lat': lat, 'lon': lng, 'format': 'geocodejson', 'addressdetails': 1}
@@ -116,4 +125,10 @@ def reverse_geocode_components(
 	response = get(url, params=params, timeout=timeout)
 	response.raise_for_status()
 	content = response.content
-	return NominatimReverseJSONv2.model_validate_json(content)
+	j = pydantic_core.from_json(content)
+	error = j.get('error')
+	if error == 'Unable to geocode':
+		return None
+	if error:
+		raise RuntimeError(error)  # TODO: better exception
+	return NominatimReverseGeocodeJSON.model_validate(j)
