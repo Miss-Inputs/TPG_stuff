@@ -157,7 +157,6 @@ def reverse_geocode_gadm_all(
 	"""Reverse geocodes using one layer of GADM for all points."""
 	if isinstance(gadm, Path):
 		gadm = read_geodataframe(gadm)
-	# point_index, gadm_index = gadm.sindex.query(points, 'within')
 	gadm_index, point_index = points.sindex.query(gadm.geometry, 'contains')
 	d: dict[int, str] = {
 		cast('int', points.index[p]): gadm.iloc[g][col_name]

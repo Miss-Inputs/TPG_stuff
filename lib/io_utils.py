@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,11 @@ def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
 		TypeError: If path ever contains something other than a GeoDataFrame.
 	"""
 	if path.suffix.lower() == '.zst':
-		with ZstdFile(path, 'r') as zst:
+		with (
+			ZstdFile(path, 'r') as zst,
+			warnings.catch_warnings(category=RuntimeWarning, action='ignore'),
+		):
+			# shut up nerd I don't care if it has a GPKG application_id or whatever
 			gdf = geopandas.read_file(zst)
 	else:
 		gdf = geopandas.read_file(path)
