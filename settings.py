@@ -24,3 +24,5 @@ class Settings(BaseSettings, extra='allow'):
 	"""Path to save average coordinate for each user as GeoJSON, with the number of the most recent round replacing {0}"""
 	theoretical_best_path: Path | None = None
 	"""Path to save a pickled DataFrame containing all rounds if every user had made a submission with their best pic (out of who has submitted so far and what)"""
+	tpg_wrapped_output_path: Path | None = None
+	"""Folder to save TPG wrapped to"""
