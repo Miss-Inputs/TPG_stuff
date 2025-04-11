@@ -1,9 +1,18 @@
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from typing import overload
+from functools import partial
+from itertools import combinations
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy
+import pandas
 import pyproj
 import shapely
+from tqdm.auto import tqdm
+from tqdm.contrib.concurrent import process_map
+
+if TYPE_CHECKING:
+	import geopandas
 
 geod = pyproj.Geod(ellps='WGS84')
 
@@ -164,3 +173,39 @@ def circular_mean_points(points: Iterable[shapely.Point]) -> shapely.Point:
 	x, y = zip(*((a.x, a.y) for a in points), strict=True)
 	mean_x, mean_y = circular_mean_xy(x, y)
 	return shapely.Point(mean_x, mean_y)
+
+
+def _dist_matrix_worker(a: Any, b: Any, *, points: 'geopandas.GeoSeries'):
+	row_a = points.loc[a]
+	row_b = points.loc[b]
+	return a, b, geod_distance(row_a, row_b)
+
+
+def distance_matrix(
+	points: 'geopandas.GeoSeries', chunksize: int = 10_000, *, multiprocess: bool = True
+) -> pandas.DataFrame:
+	# I should probably use sklearn pairwise distances here but eh, didn't feel like it
+	distances = defaultdict(dict)
+	n = points.size
+
+	if multiprocess:
+		f = partial(_dist_matrix_worker, points=points)
+		index_combinations = list(combinations(points.index, 2))
+		for a, b, dist in process_map(
+			f,
+			*zip(*index_combinations, strict=True),
+			chunksize=chunksize,
+			desc='Calculating distances',
+			leave=False,
+		):
+			distances[a][b] = distances[b][a] = dist
+	else:
+		total = (n * (n - 1)) // 2
+		for a, b in tqdm(
+			combinations(points.index, 2), 'Calculating distances', total, leave=False
+		):
+			row_a = points.loc[a]
+			row_b = points.loc[b]
+			dist = geod_distance(row_a, row_b)
+			distances[a][b] = distances[b][a] = dist
+	return pandas.DataFrame(distances)
