@@ -1,18 +1,16 @@
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from functools import partial
 from itertools import combinations
-from typing import TYPE_CHECKING, Any, overload
+from typing import Any, overload
 
+import geopandas
 import numpy
 import pandas
 import pyproj
 import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.concurrent import process_map
-
-if TYPE_CHECKING:
-	import geopandas
 
 geod = pyproj.Geod(ellps='WGS84')
 
@@ -23,22 +21,26 @@ def geod_distance_and_bearing(
 ) -> tuple[float, float]: ...
 
 
+FloatListlike = Sequence[float] | numpy.ndarray | pandas.Series
+"""Accepted input types to pyproj.Geod.inv"""
+
+
 @overload
 def geod_distance_and_bearing(
-	lat1: Sequence[float],
-	lng1: Sequence[float],
-	lat2: Sequence[float],
-	lng2: Sequence[float],
+	lat1: FloatListlike,
+	lng1: FloatListlike,
+	lat2: FloatListlike,
+	lng2: FloatListlike,
 	*,
 	radians: bool = False,
 ) -> tuple[numpy.ndarray, numpy.ndarray]: ...
 
 
 def geod_distance_and_bearing(
-	lat1: float | Sequence[float],
-	lng1: float | Sequence[float],
-	lat2: float | Sequence[float],
-	lng2: float | Sequence[float],
+	lat1: float | FloatListlike,
+	lng1: float | FloatListlike,
+	lat2: float | FloatListlike,
+	lng2: float | FloatListlike,
 	*,
 	radians: bool = False,
 ) -> tuple[float | numpy.ndarray, float | numpy.ndarray]:
@@ -209,3 +211,55 @@ def distance_matrix(
 			dist = geod_distance(row_a, row_b)
 			distances[a][b] = distances[b][a] = dist
 	return pandas.DataFrame(distances)
+
+
+def get_point_uniqueness(
+	point: shapely.Point,
+	others: geopandas.GeoSeries | shapely.GeometryCollection | Sequence[shapely.Point],
+	*,
+	use_geod: bool = True,
+):
+	"""Finds how far away a point is from any other point.
+
+	Arguments:
+		point: A point to be compared to others.
+		others: The other points, convertible to GeoSeries. Assumed to be in the same CRS as point, and to not already include point.
+
+	Returns:
+		(distance in metres, index in others of closest point)
+	"""
+	# I dunno about this type hint for others but eh, I'm just putting stuff in there just in case
+	if not isinstance(others, geopandas.GeoSeries):
+		others = geopandas.GeoSeries(others)
+	n = others.size
+	x = [point.x] * n
+	y = [point.y] * n
+	distances_array = (
+		geod_distance_and_bearing(y, x, others.y, others.x)[0]
+		if use_geod
+		else haversine_distance(
+			numpy.asarray(y), numpy.asarray(x), others.y.to_numpy(), others.x.to_numpy()
+		)
+	)
+	distances = pandas.Series(distances_array, index=others.index)
+	min_dist, min_index = distances.agg(['min', 'idxmin'])
+	return min_dist, min_index
+
+
+def get_points_uniqueness(points: geopandas.GeoSeries):
+	"""Gets the minimum distance to other points and index of closest point for each point in points.
+
+	Raises:
+		TypeError: If points does not contain points.
+
+	Returns:
+		(distances, closest indexes)
+	"""
+	distances: dict[Hashable, float] = {}
+	closest_indexes: dict[Hashable, Hashable] = {}
+	for index, point in tqdm(points.items(), 'Finding uniqueness', points.size):
+		if not isinstance(point, shapely.Point):
+			raise TypeError(type(point))
+		others = points.drop(index=index)
+		distances[index], closest_indexes[index] = get_point_uniqueness(point, others)
+	return pandas.Series(distances), pandas.Series(closest_indexes)
