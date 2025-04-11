@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 from functools import cache
 
 import geopandas
@@ -16,6 +17,8 @@ from lib.io_utils import (
 from lib.reverse_geocode import reverse_geocode_gadm_all, reverse_geocode_gadm_country
 from settings import Settings
 
+logger = logging.getLogger(__name__)
+
 
 def _to_flag_emoji(cc: str):
 	return ''.join(chr(ord(c) + (ord('🇦') - ord('A'))) for c in cc)
@@ -24,7 +27,7 @@ def _to_flag_emoji(cc: str):
 def get_tpg_wrapped(
 	name: str, username: str, submissions: geopandas.GeoDataFrame, rows_shown: int = 5
 ):
-	#Not finished yet, and also messy as all fuck
+	# Not finished yet, and also messy as all fuck
 	user_submissions = submissions[submissions['username'] == username].copy()
 	first_usages = user_submissions[user_submissions['first_use']]
 
@@ -161,7 +164,11 @@ def get_flag_emoji(country_name: str | None) -> str | None:
 	}
 	if country_name in others:
 		return others[country_name]
-	countries = pycountry.countries.search_fuzzy(country_name)
+	try:
+		countries = pycountry.countries.search_fuzzy(country_name)
+	except LookupError:
+		logger.warning('Could not find country %s', country_name)
+		return None
 	if not countries:
 		return None
 	return getattr(countries[0], 'flag', None)
@@ -229,5 +236,7 @@ def main() -> None:
 			path = settings.tpg_wrapped_output_path / f'{username}.txt'
 			path.write_text(wrapped, 'utf-8')
 
+
 if __name__ == '__main__':
+	logging.basicConfig(level=logging.INFO)
 	main()
