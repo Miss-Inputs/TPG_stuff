@@ -19,9 +19,9 @@ def load_australia(gadm_path: Path):
 
 def main() -> None:
 	settings = Settings()
-	if not settings.gadm_path:
+	if not settings.gadm_0_path:
 		raise RuntimeError('gadm_path needs to be specified')
-	au = load_australia(settings.gadm_path)
+	au = load_australia(settings.gadm_0_path)
 	point = random_point_in_poly(au)
 	print(point)
 
