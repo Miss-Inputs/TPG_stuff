@@ -51,7 +51,7 @@ def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
 	Raises:
 		TypeError: If path ever contains something other than a GeoDataFrame.
 	"""
-	if path.suffix.lower() == '.zstd':
+	if path.suffix.lower() == '.zst':
 		with ZstdFile(path, 'r') as zst:
 			gdf = geopandas.read_file(zst)
 	else:
