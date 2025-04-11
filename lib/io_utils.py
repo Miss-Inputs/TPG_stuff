@@ -1,7 +1,9 @@
 from pathlib import Path
 from typing import Any
 
+import geopandas
 import pandas
+from pyzstd import ZstdFile
 from tqdm.auto import tqdm
 
 
@@ -41,3 +43,20 @@ def read_dataframe_pickle(path: Path, **tqdm_kwargs) -> pandas.DataFrame:
 def format_path(path: Path, n: Any):
 	"""Replaces {} in a path stem with n."""
 	return path.with_stem(path.stem.format(n))
+
+
+def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
+	"""Reads a GeoDataFrame from a path, which can be compressed using Zstandard.
+
+	Raises:
+		TypeError: If path ever contains something other than a GeoDataFrame.
+	"""
+	if path.suffix.lower() == '.zstd':
+		with ZstdFile(path, 'r') as zst:
+			gdf = geopandas.read_file(zst)
+	else:
+		gdf = geopandas.read_file(path)
+	if not isinstance(gdf, geopandas.GeoDataFrame):
+		# Not sure if this ever happens, or if the type hint is just like that
+		raise TypeError(f'Expected {path} to contain GeoDataFrame, got {type(gdf)}')
+	return gdf
