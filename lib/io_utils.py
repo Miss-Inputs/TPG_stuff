@@ -1,3 +1,4 @@
+import asyncio
 import warnings
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,12 @@ def read_dataframe_pickle(path: Path, **tqdm_kwargs) -> pandas.DataFrame:
 	return obj
 
 
+async def read_dataframe_pickle_async(path: Path, **tqdm_kwargs) -> pandas.DataFrame:
+	"""Reads a pickled DataFrame from a file path in a separate thread, displaying a progress bar for long files."""
+	# Could use aiofiles, but eh
+	return await asyncio.to_thread(read_dataframe_pickle, path, **tqdm_kwargs)
+
+
 def format_path(path: Path, n: Any):
 	"""Replaces {} in a path stem with n."""
 	return path.with_stem(path.stem.format(n))
@@ -65,3 +72,8 @@ def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
 		# Not sure if this ever happens, or if the type hint is just like that
 		raise TypeError(f'Expected {path} to contain GeoDataFrame, got {type(gdf)}')
 	return gdf
+
+
+async def read_geodataframe_async(path: Path) -> geopandas.GeoDataFrame:
+	"""Reads a GeoDataFrame from a path in another thread, which can be compressed using Zstandard."""
+	return await asyncio.to_thread(read_geodataframe, path)
