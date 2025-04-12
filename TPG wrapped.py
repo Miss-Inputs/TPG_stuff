@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Hashable
 from functools import cached_property
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 import aiohttp
 import geopandas
@@ -201,7 +202,7 @@ class TPGWrapped:
 			)
 		parts.append('\n'.join(closest_submissions_lines))
 
-		highest_rank_lines = ['Highest rank:']
+		highest_rank_lines = ['Highest placings:']
 		highest_rank = self.user_submissions.sort_values('place').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank.iterrows(), 1):
 			highest_rank_lines.append(
@@ -209,7 +210,7 @@ class TPGWrapped:
 			)
 		parts.append('\n'.join(highest_rank_lines))
 
-		highest_rank_pct_lines = ['Highest rank %:']
+		highest_rank_pct_lines = ['Highest placing % (top % of round submissions):']
 		highest_rank_pct = self.user_submissions.sort_values('place_percent').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
 			highest_rank_pct_lines.append(
@@ -237,9 +238,11 @@ class TPGWrapped:
 		return PurePath(name)
 
 
-async def _try_get_cc(row: pandas.Series, session: ClientSession):
-	name = row['country']
-	#Territories that are in GADM but not ISO, so would be reverse geocoded as something else. Obligatory disclaimer that I am neither supporting or opposing either side of any disputes, this is just potentially interesting for stats
+async def _try_get_cc(
+	index: Hashable, row: pandas.Series, country_names: pandas.Series, session: ClientSession
+) -> tuple[str | None, str | None, str | None]:
+	name = country_names[index]  # type: ignore[reportCallIssue] #blahhh
+	# Territories that are in GADM but not ISO, so might be reverse geocoded as something else. Obligatory disclaimer that I am neither supporting or opposing either side of any disputes, this is just potentially interesting for stats
 	funny_territories = {
 		'Northern Cyprus',
 		'Akrotiri and Dhekelia',
@@ -249,8 +252,8 @@ async def _try_get_cc(row: pandas.Series, session: ClientSession):
 	}
 	if name in funny_territories:
 		return name, None, None
-	
-	cc = country_name_to_code(row['country'])
+
+	cc = country_name_to_code(name)
 	if cc:
 		return name, cc, _to_flag_emoji(cc)
 	reverse_geo = await reverse_geocode_components(row['latitude'], row['longitude'], session)
@@ -264,26 +267,43 @@ async def _try_get_cc(row: pandas.Series, session: ClientSession):
 	return name, None, name or '🏳️'
 
 
-async def add_countries_etc_from_gadm(
+async def _get_gadm_countries(
+	submissions: geopandas.GeoDataFrame, gadm_path: Path, session: ClientSession
+):
+	gadm_0 = await read_geodataframe_async(gadm_path)
+	countries = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
+	return pandas.DataFrame.from_dict(
+		{
+			index: await _try_get_cc(index, row, countries, session)
+			for index, row in submissions.iterrows()
+		},
+		orient='index',
+		columns=['country', 'cc', 'flag'],
+	)
+
+
+async def _get_gadm_subdivs(submissions: geopandas.GeoDataFrame, gadm_path: Path):
+	gadm_1 = await read_geodataframe_async(gadm_path)
+	s = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
+	s.name = 'oblast'
+	return s
+
+
+async def _add_countries_etc_from_gadm(
 	submissions: geopandas.GeoDataFrame, settings: Settings, session: ClientSession
 ):
-	# TODO: Could probably load the 4 levels concurrently
+	tasks = []
 	if settings.gadm_0_path:
-		gadm_0 = await read_geodataframe_async(settings.gadm_0_path)
-		submissions['country'] = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
-		submissions[['country', 'cc', 'flag']] = pandas.DataFrame.from_dict(
-			{index: await _try_get_cc(row, session) for index, row in submissions.iterrows()},
-			orient='index',
-		)
+		tasks.append(_get_gadm_countries(submissions, settings.gadm_0_path, session))
 	if settings.gadm_1_path:
-		gadm_1 = await read_geodataframe_async(settings.gadm_1_path)
-		submissions['oblast'] = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
-	if settings.gadm_2_path:
-		gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
-		submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
-	if settings.gadm_3_path:
-		gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
-		submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
+		tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path))
+	# if settings.gadm_2_path:
+	# 	gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
+	# 	submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
+	# if settings.gadm_3_path:
+	# 	gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
+	# 	submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
+	return [await task for task in tqdm.as_completed(tasks, desc='Finding countries/subdivisions/etc.')]
 
 
 async def get_and_write_wrapped_for_user(
@@ -334,7 +354,11 @@ async def main() -> None:
 	usernames = submissions['username'].unique()
 
 	async with aiohttp.ClientSession() as sesh:
-		await add_countries_etc_from_gadm(submissions, settings, sesh)
+		submissions = pandas.concat(
+			[submissions, *await _add_countries_etc_from_gadm(submissions, settings, sesh)],
+			axis='columns',
+		)
+		assert isinstance(submissions, geopandas.GeoDataFrame), type(submissions)
 		tasks = []
 		for username in usernames:
 			name = names.get(username, username)

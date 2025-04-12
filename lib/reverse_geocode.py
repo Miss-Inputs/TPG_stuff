@@ -261,7 +261,7 @@ def reverse_geocode_gadm_all(
 		cast('int', points.index[p]): gadm.iloc[g][col_name]
 		for p, g in zip(point_index, gadm_index, strict=True)
 	}
-	return pandas.Series(d)
+	return pandas.Series(d, index=points.index)
 
 
 def reverse_geocode_gadm_country(
