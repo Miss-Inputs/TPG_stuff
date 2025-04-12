@@ -62,10 +62,14 @@ def country_name_to_code(country_name: str | None) -> str | None:
 		return None
 	others = {
 		# Mapping some things manually because GADM has older names for things, or iso-codes doesn't have something as a common name that you would expect it to, or some other weird cases. Please don't cancel me for any of this
-		'Northern Cyprus': None,  # eh, GADM has it there separately, whaddya do
 		'Democratic Republic of the Congo': 'CD',
+		'Kosovo': 'XK', #pycountry will simply return Serbia from the fuzzy search…
+		'Northern Cyprus': None,  # eh, GADM has it there separately, whaddya do
 		'Swaziland': 'SZ',
 		'Turkey': 'TR',
+		# Or because pycountry search_fuzzy insists on checking subdivision names first sometimes
+		'Sint Maarten': 'SX',
+		'Curaçao': 'CW',
 	}
 	if country_name in others:
 		return others[country_name]
@@ -77,7 +81,7 @@ def country_name_to_code(country_name: str | None) -> str | None:
 	if not countries:
 		return None
 	if len(countries) > 1:
-		logger.info(
+		logger.debug(
 			'pycountry search_fuzzy for %s returned %d matches: %s, using first match',
 			country_name,
 			len(countries),

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from functools import cache, cached_property
+from functools import cached_property
 from pathlib import PurePath
 
 import aiohttp
@@ -20,6 +20,7 @@ from lib.io_utils import (
 from lib.other_utils import country_name_to_code, describe_row, format_point
 from lib.reverse_geocode import (
 	reverse_geocode_address,
+	reverse_geocode_components,
 	reverse_geocode_gadm_all,
 	reverse_geocode_gadm_country,
 )
@@ -63,9 +64,14 @@ class TPGWrapped:
 		)
 
 	@cached_property
-	def unique_countries(self):
+	def unique_country_flags(self):
 		"""Returns country codes, but the names of countries/territories if they're something that doesn't have an ISO code"""
-		return self.user_submissions['cc'].fillna(self.user_submissions['country']).unique()
+		return (
+			self.user_submissions['flag']
+			.fillna(self.user_submissions['country'])
+			.fillna('🏳️')
+			.unique()
+		)
 
 	@cached_property
 	def unique_subdivisions(self):
@@ -96,7 +102,7 @@ class TPGWrapped:
 
 	def most_used_unique_countries(self, *, unique_locs: bool = False):
 		locs = self.first_usages if unique_locs else self.user_submissions
-		country_usage = locs.groupby('country', dropna=False, sort=False).size()
+		country_usage = locs.groupby(['country', 'flag'], dropna=False, sort=False).size()
 		return country_usage.sort_values(ascending=False).head(self.rows_shown)
 
 	def _most_used_countries_text(self, *, unique_locs: bool = False):
@@ -106,23 +112,21 @@ class TPGWrapped:
 			else 'Most submitted countries:'
 		]
 		most_used_countries = self.most_used_unique_countries(unique_locs=unique_locs)
-		for i, (country, usage) in enumerate(most_used_countries.items(), 1):
+		for i, ((flag, country), usage) in enumerate(most_used_countries.items(), 1):  # type: ignore[reportGeneralTypeIssues]
 			if pandas.isna(country):  # type: ignore[argumentType] #what the hell
 				country_usage_lines.append(f'{i}. <unknown> ({usage} times)')
 			else:
-				country_usage_lines.append(
-					f'{i}. {get_flag_emoji(country)} {country} ({usage} times)'
-				)
+				country_usage_lines.append(f'{i}. {flag} {country} ({usage} times)')
 		return '\n'.join(country_usage_lines)
 
 	async def to_text(self, session: ClientSession):
 		"""session is used here for geocoding"""
 		parts = [f"{self.name}'s TPG Wrapped for Season 2"]
-		countries_formatted = ' '.join(_to_flag_emoji(cc) for cc in self.unique_countries)
+		countries_formatted = ' '.join(self.unique_country_flags)
 		opening_lines = [
 			f'Rounds played this season: {self.user_submissions.index.size}',
 			f'Number of unique photos: {self.first_usages.index.size}',
-			f'Unique countries: {len(self.unique_countries)} {countries_formatted}',
+			f'Unique countries: {len(self.unique_country_flags)} {countries_formatted}',
 			f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
 			f'Average (mean) placement: {self.user_submissions["place"].mean()}',
 			f'Median placement: {self.user_submissions["place"].median()}',
@@ -144,7 +148,7 @@ class TPGWrapped:
 		if average_point_address:
 			average_point_lines.append(average_point_address)
 		average_point_lines.append(
-			f'Average point of all your submissions: {average_point_weighted.y},{average_point_weighted.x}'
+			f'Average point of all your submissions: {format_point(average_point_weighted)}'
 		)
 		if average_point_weighted_address:
 			average_point_lines.append(average_point_weighted_address)
@@ -170,16 +174,14 @@ class TPGWrapped:
 
 		subdiv_usage_lines = ['Most submitted subdivisions:']
 		subdiv_usage = self.user_submissions.groupby(
-			['country', 'oblast'], dropna=False, sort=False
+			['flag', 'country', 'oblast'], dropna=False, sort=False
 		).size()
 		most_used_subdivs = subdiv_usage.sort_values(ascending=False).head(self.rows_shown)
-		for i, ((country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
+		for i, ((flag, country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
 			if pandas.isna(country):  # type: ignore[argumentType]
 				subdiv_usage_lines.append(f'{i}. <unknown> ({usage} times)')
 			else:
-				subdiv_usage_lines.append(
-					f'{i}. {get_flag_emoji(country)} {subdiv}, {country} ({usage} times)'
-				)
+				subdiv_usage_lines.append(f'{i}. {flag} {subdiv}, {country} ({usage} times)')
 		parts.append('\n'.join(subdiv_usage_lines))
 
 		# Most consecutive same photos (probably won't try doing this)
@@ -235,23 +237,44 @@ class TPGWrapped:
 		return PurePath(name)
 
 
-@cache
-def get_flag_emoji(country_name: str | None) -> str | None:
-	if pandas.isna(country_name):
-		return '🏳️'
-	cc = country_name_to_code(country_name)
-	if not cc:
-		return ''
-	return _to_flag_emoji(cc)
+async def _try_get_cc(row: pandas.Series, session: ClientSession):
+	name = row['country']
+	#Territories that are in GADM but not ISO, so would be reverse geocoded as something else. Obligatory disclaimer that I am neither supporting or opposing either side of any disputes, this is just potentially interesting for stats
+	funny_territories = {
+		'Northern Cyprus',
+		'Akrotiri and Dhekelia',
+		'Clipperton Island',
+		'Paracel Islands',
+		'Spratly Islands',
+	}
+	if name in funny_territories:
+		return name, None, None
+	
+	cc = country_name_to_code(row['country'])
+	if cc:
+		return name, cc, _to_flag_emoji(cc)
+	reverse_geo = await reverse_geocode_components(row['latitude'], row['longitude'], session)
+	if reverse_geo and reverse_geo.features:
+		props = reverse_geo.features[0].properties.geocoding
+		cc = props.country_code
+		if cc:
+			return props.country, cc.upper(), _to_flag_emoji(cc.upper())
+	if row['latitude'] <= -60:
+		return 'Antarctica', 'AQ', _to_flag_emoji('AQ')
+	return name, None, name or '🏳️'
 
 
-async def add_countries_etc_from_gadm(submissions: geopandas.GeoDataFrame, settings: Settings):
+async def add_countries_etc_from_gadm(
+	submissions: geopandas.GeoDataFrame, settings: Settings, session: ClientSession
+):
 	# TODO: Could probably load the 4 levels concurrently
 	if settings.gadm_0_path:
 		gadm_0 = await read_geodataframe_async(settings.gadm_0_path)
 		submissions['country'] = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
-		submissions['cc'] = submissions['country'].map(country_name_to_code)  # type: ignore[overload] #Stop being stupid, pyright
-		# TODO: Where country is null, try Nominatim instead
+		submissions[['country', 'cc', 'flag']] = pandas.DataFrame.from_dict(
+			{index: await _try_get_cc(row, session) for index, row in submissions.iterrows()},
+			orient='index',
+		)
 	if settings.gadm_1_path:
 		gadm_1 = await read_geodataframe_async(settings.gadm_1_path)
 		submissions['oblast'] = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
@@ -295,9 +318,10 @@ async def main() -> None:
 		path,
 		submissions['round'].max(),
 	)
+	submissions = submissions[submissions['round'] >= 215].copy()
+	logger.info('%d submissions for season 2', submissions.index.size)
 
 	submissions['target_cc'] = submissions.pop('country').fillna('XW')
-	submissions = submissions[submissions['round'] >= 215]
 	submissions['place_percent'] = submissions['place'] / submissions['total_subs']
 	submissions['first_use'] = ~submissions.duplicated(['latitude', 'longitude'], keep='first')
 	submissions = geopandas.GeoDataFrame(
@@ -305,12 +329,12 @@ async def main() -> None:
 		geometry=geopandas.points_from_xy(submissions['longitude'], submissions['latitude']),
 		crs='wgs84',
 	)
-	await add_countries_etc_from_gadm(submissions, settings)
 
 	names = submissions.drop_duplicates('username').set_index('username')['name'].to_dict()
 	usernames = submissions['username'].unique()
 
 	async with aiohttp.ClientSession() as sesh:
+		await add_countries_etc_from_gadm(submissions, settings, sesh)
 		tasks = []
 		for username in usernames:
 			name = names.get(username, username)

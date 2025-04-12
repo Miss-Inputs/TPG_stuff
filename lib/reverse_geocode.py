@@ -71,6 +71,7 @@ class NominatimGeocodingProperties(BaseModel, extra='allow'):
 	state: str | None = None
 	country: str | None = None
 	"""Should _usually_ be there unless you're in a strange location (e.g. Antarctica)"""
+	country_code: str | None = None
 	admin: dict[str, str]
 	"""keys: level9, level7, level4, etc"""
 
@@ -100,7 +101,11 @@ class GeocodeError(Exception):
 
 @cache
 def reverse_geocode_address_sync(
-	lat: float, lng: float, session: requests.Session | None = None, timeout: int = 10
+	lat: float,
+	lng: float,
+	session: requests.Session | None = None,
+	lang: str = 'en',
+	timeout: int = 10,
 ) -> str | None:
 	"""Finds an address for a point using synchronous requests.
 
@@ -115,7 +120,13 @@ def reverse_geocode_address_sync(
 	"""
 	get = session.get if session else requests.get
 	url = 'https://nominatim.geocoding.ai/reverse'
-	params = {'lat': lat, 'lon': lng, 'format': 'jsonv2', 'addressdetails': 0}
+	params = {
+		'lat': lat,
+		'lon': lng,
+		'format': 'jsonv2',
+		'addressdetails': 0,
+		'accept-language': lang,
+	}
 
 	response = get(url, params=params, timeout=timeout)
 	response.raise_for_status()
@@ -131,6 +142,7 @@ async def reverse_geocode_address(
 	lat: float,
 	lng: float,
 	session: aiohttp.ClientSession,
+	lang: str = 'en',
 	request_timeout: int = 10,
 ) -> str | None:
 	"""Finds an address for a point using asynchronous requests.
@@ -148,7 +160,13 @@ async def reverse_geocode_address(
 		Address as string, or None if nothing could be found.
 	"""
 	url = 'https://nominatim.geocoding.ai/reverse'
-	params = {'lat': lat, 'lon': lng, 'format': 'jsonv2', 'addressdetails': 0}
+	params = {
+		'lat': lat,
+		'lon': lng,
+		'format': 'jsonv2',
+		'addressdetails': 0,
+		'accept-language': lang,
+	}
 
 	async with session.get(
 		url, params=params, timeout=aiohttp.ClientTimeout(request_timeout)
@@ -187,8 +205,13 @@ def reverse_geocode_components_sync(
 		raise GeocodeError(error)
 	return NominatimReverseGeocodeJSON.model_validate(j)
 
+
 async def reverse_geocode_components(
-	lat: float, lng: float, session: aiohttp.ClientSession, request_timeout: int = 10
+	lat: float,
+	lng: float,
+	session: aiohttp.ClientSession,
+	lang: str = 'en',
+	request_timeout: int = 10,
 ) -> NominatimReverseGeocodeJSON | None:
 	"""Returns individual address components instead of just a string.
 
@@ -196,9 +219,17 @@ async def reverse_geocode_components(
 		GeocodeError: If some weird error happens that isn't just 'unable to geocode'
 	"""
 	url = 'https://nominatim.geocoding.ai/reverse'
-	params = {'lat': lat, 'lon': lng, 'format': 'geocodejson', 'addressdetails': 1}
+	params = {
+		'lat': lat,
+		'lon': lng,
+		'format': 'geocodejson',
+		'addressdetails': 1,
+		'accept-language': lang,
+	}
 
-	async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(request_timeout)) as response:
+	async with session.get(
+		url, params=params, timeout=aiohttp.ClientTimeout(request_timeout)
+	) as response:
 		response.raise_for_status()
 		text = await response.text()
 	j = pydantic_core.from_json(text)
