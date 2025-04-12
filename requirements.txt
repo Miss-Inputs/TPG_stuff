@@ -7,3 +7,5 @@ tqdm
 scikit-learn #not using it yet whoops
 pyzstd
 pycountry
+aiohttp
+async-lru

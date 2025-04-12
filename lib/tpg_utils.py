@@ -1,7 +1,7 @@
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from lib.reverse_geocode import reverse_geocode_address
+from lib.reverse_geocode import reverse_geocode_address_sync
 
 if TYPE_CHECKING:
 	import pandas
@@ -29,9 +29,9 @@ def tpg_score(distances: 'pandas.Series'):
 
 
 def print_round(n: int, row: Any, sesh: 'requests.Session | None' = None):
-	loc_address = reverse_geocode_address(row.target_lat, row.target_lng, sesh)
+	loc_address = reverse_geocode_address_sync(row.target_lat, row.target_lng, sesh)
 	print(f'{n}: Round {row.round}: {row.target_lat, row.target_lng} {loc_address}')
-	sub_address = reverse_geocode_address(row.latitude, row.longitude, sesh)
+	sub_address = reverse_geocode_address_sync(row.latitude, row.longitude, sesh)
 	print(f'Submission: {row.latitude}, {row.longitude} {sub_address}')
 	print(
 		f'Distance: {row.distance / 1000:4g}km Place: {row.place}/{row.total_subs} Score: {row.score}'

@@ -2,9 +2,11 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import aiohttp
 import pandas
 import pydantic_core
 import requests
+from async_lru import alru_cache
 from pydantic import BaseModel
 
 from lib.io_utils import read_geodataframe
@@ -15,8 +17,6 @@ if TYPE_CHECKING:
 
 
 class NominatimReverseJSONv2(BaseModel, extra='allow'):
-	"""If addressdetails is 1 (default, but we set it to 0), also has address field (object with varying address components)"""
-
 	place_id: int
 	licence: str
 	"""Copyright string"""
@@ -36,6 +36,10 @@ class NominatimReverseJSONv2(BaseModel, extra='allow'):
 	display_name: str
 	boundingbox: tuple[float, float, float, float]
 	"""min lat, max lat, min long, max long"""
+
+
+class NominatimReverseJSONv2WithAddressDetails(NominatimReverseJSONv2):
+	address: dict[str, str]
 
 
 class NominatimGeocoding(BaseModel, extra='allow'):
@@ -90,8 +94,12 @@ class NominatimReverseGeocodeJSON(BaseModel, extra='allow'):
 	features: list[NominatimFeature]
 
 
+class GeocodeError(Exception):
+	pass
+
+
 @cache
-def reverse_geocode_address(
+def reverse_geocode_address_sync(
 	lat: float, lng: float, session: requests.Session | None = None, timeout: int = 10
 ) -> str | None:
 	"""Finds an address for a point using synchronous requests.
@@ -118,13 +126,51 @@ def reverse_geocode_address(
 	return NominatimReverseJSONv2.model_validate_json(content).display_name
 
 
-def reverse_geocode_components(
+@alru_cache
+async def reverse_geocode_address(
+	lat: float,
+	lng: float,
+	session: aiohttp.ClientSession,
+	request_timeout: int = 10,
+) -> str | None:
+	"""Finds an address for a point using asynchronous requests.
+
+	Raises:
+		GeocodeError: If some weird error happens.
+
+	Arguments:
+		lat: Latitude of point in WGS84.
+		lng: Longitude of point in WGS84.
+		session: Optional requests.Session if you have one, otherwise does not use a session. Recommended if you are using this in a loop, etc.
+		timeout: Request timeout in seconds, defaults to 10 seconds.
+
+	Returns:
+		Address as string, or None if nothing could be found.
+	"""
+	url = 'https://nominatim.geocoding.ai/reverse'
+	params = {'lat': lat, 'lon': lng, 'format': 'jsonv2', 'addressdetails': 0}
+
+	async with session.get(
+		url, params=params, timeout=aiohttp.ClientTimeout(request_timeout)
+	) as response:
+		response.raise_for_status()
+		text = await response.text()
+	j = pydantic_core.from_json(text)
+	error = j.get('error')
+	if error == 'Unable to geocode':
+		return None
+	if error:
+		raise GeocodeError(error)
+	return NominatimReverseJSONv2.model_validate(j).display_name
+
+
+def reverse_geocode_components_sync(
 	lat: float, lng: float, session: requests.Session | None = None, timeout: int = 10
 ) -> NominatimReverseGeocodeJSON | None:
 	"""Returns individual address components instead of just a string.
 
 	Raises:
-		RuntimeError: If some weird error happens that isn't just 'unable to geocode'
+		GeocodeError: If some weird error happens that isn't just 'unable to geocode'
 	"""
 	get = session.get if session else requests.get
 	url = 'https://nominatim.geocoding.ai/reverse'
@@ -138,7 +184,29 @@ def reverse_geocode_components(
 	if error == 'Unable to geocode':
 		return None
 	if error:
-		raise RuntimeError(error)  # TODO: better exception
+		raise GeocodeError(error)
+	return NominatimReverseGeocodeJSON.model_validate(j)
+
+async def reverse_geocode_components(
+	lat: float, lng: float, session: aiohttp.ClientSession, request_timeout: int = 10
+) -> NominatimReverseGeocodeJSON | None:
+	"""Returns individual address components instead of just a string.
+
+	Raises:
+		GeocodeError: If some weird error happens that isn't just 'unable to geocode'
+	"""
+	url = 'https://nominatim.geocoding.ai/reverse'
+	params = {'lat': lat, 'lon': lng, 'format': 'geocodejson', 'addressdetails': 1}
+
+	async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(request_timeout)) as response:
+		response.raise_for_status()
+		text = await response.text()
+	j = pydantic_core.from_json(text)
+	error = j.get('error')
+	if error == 'Unable to geocode':
+		return None
+	if error:
+		raise GeocodeError(error)
 	return NominatimReverseGeocodeJSON.model_validate(j)
 
 
