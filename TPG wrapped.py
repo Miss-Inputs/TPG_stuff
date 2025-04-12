@@ -120,6 +120,15 @@ class TPGWrapped:
 				country_usage_lines.append(f'{i}. {flag} {country} ({usage} times)')
 		return '\n'.join(country_usage_lines)
 
+	def most_obscure_countries(self):
+		other_submissions = self.submissions[self.submissions['username'] != 'username']
+		counts = other_submissions[['country', 'flag']].value_counts(sort=True, ascending=True)
+		assert isinstance(counts.index, pandas.MultiIndex), type(counts.index)
+		counts = counts[
+			counts.index.levels[0].isin(self.user_submissions['country'].dropna().unique())
+		]
+		return counts.head(self.rows_shown)
+
 	async def to_text(self, session: ClientSession):
 		"""session is used here for geocoding"""
 		parts = [f"{self.name}'s TPG Wrapped for Season 2"]
@@ -188,6 +197,13 @@ class TPGWrapped:
 		# Most consecutive same photos (probably won't try doing this)
 		# Most consecutive unique photos
 		# Most consecutive unique countries
+		most_obscure_countries_lines = ['Most obscure countries:']
+		for i, ((country, flag), usage) in enumerate(self.most_obscure_countries().items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
+			most_obscure_countries_lines.append(
+				f'{i}. {flag} {country}, submitted by {usage} other players'
+			)
+		parts.append('\n'.join(most_obscure_countries_lines))
+
 		# Most obscure countries submitted
 		# Most obscure subdivisions submitted
 		# Most unique locations
