@@ -8,7 +8,6 @@ from pathlib import PurePath
 import aiohttp
 import geopandas
 import pandas
-import pycountry
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
 
@@ -18,7 +17,7 @@ from lib.io_utils import (
 	read_dataframe_pickle_async,
 	read_geodataframe_async,
 )
-from lib.other_utils import describe_row, format_point
+from lib.other_utils import country_name_to_code, describe_row, format_point
 from lib.reverse_geocode import (
 	reverse_geocode_address,
 	reverse_geocode_gadm_all,
@@ -29,8 +28,17 @@ from settings import Settings
 logger = logging.getLogger(__name__)
 
 
-def _to_flag_emoji(cc: str):
+def _to_flag_emoji(cc: str) -> str:
+	if cc == 'XW':
+		# I'm going to use this for water rounds, which we don't have in season 2, but just for the sake of making this robust
+		return '🌊'
 	return ''.join(chr(ord(c) + (ord('🇦') - ord('A'))) for c in cc)
+
+
+async def _describe_round_row(row: pandas.Series, session: ClientSession):
+	round_num = row['round']
+	flag = _to_flag_emoji(row['target_cc'])
+	return f'Round {round_num} {flag}: {await describe_row(row, session)}'
 
 
 class TPGWrapped:
@@ -55,9 +63,9 @@ class TPGWrapped:
 		)
 
 	@cached_property
-	def unique_country_flags(self):
-		"""Returns flags as str, but the names of countries/territories if they're something that doesn't have a flag"""
-		return self.user_submissions['flag'].fillna(self.user_submissions['country']).unique()
+	def unique_countries(self):
+		"""Returns country codes, but the names of countries/territories if they're something that doesn't have an ISO code"""
+		return self.user_submissions['cc'].fillna(self.user_submissions['country']).unique()
 
 	@cached_property
 	def unique_subdivisions(self):
@@ -109,14 +117,18 @@ class TPGWrapped:
 
 	async def to_text(self, session: ClientSession):
 		"""session is used here for geocoding"""
-		parts = [
-			f"{self.name}'s TPG Wrapped for Season 2",
-			f'Rounds played this season: {self.user_submissions.index.size}\n'
-			+ f'Number of unique photos: {self.first_usages.index.size}\n'
-			+ f'Unique countries: {len(self.unique_country_flags)} {" ".join(self.unique_country_flags)}\n'
-			+ f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
-			# Average ranking
+		parts = [f"{self.name}'s TPG Wrapped for Season 2"]
+		countries_formatted = ' '.join(_to_flag_emoji(cc) for cc in self.unique_countries)
+		opening_lines = [
+			f'Rounds played this season: {self.user_submissions.index.size}',
+			f'Number of unique photos: {self.first_usages.index.size}',
+			f'Unique countries: {len(self.unique_countries)} {countries_formatted}',
+			f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
+			f'Average (mean) placement: {self.user_submissions["place"].mean()}',
+			f'Median placement: {self.user_submissions["place"].median()}',
+			f'Average placement percentage: {self.user_submissions["place_percent"].mean():%}',
 		]
+		parts.append('\n'.join(opening_lines))
 
 		average_point = self.average_point
 		average_point_weighted = self.average_point_weighted
@@ -155,7 +167,6 @@ class TPGWrapped:
 				self._most_used_countries_text(unique_locs=True),
 			)
 		)
-		# TODO: Move logic here into properties
 
 		subdiv_usage_lines = ['Most submitted subdivisions:']
 		subdiv_usage = self.user_submissions.groupby(
@@ -180,10 +191,11 @@ class TPGWrapped:
 		# Least unique locations
 
 		closest_submissions_lines = ['Closest submissions:']
+		# distance here is haversine distances which TPG scoring uses. Would comparing geodesic distances be interesting?
 		closest_submissions = self.user_submissions.sort_values('distance').head(self.rows_shown)
 		for i, (_, row) in enumerate(closest_submissions.iterrows(), 1):
 			closest_submissions_lines.append(
-				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {await describe_row(row, session)} ({row["distance"] / 1000:,.3f} km)'
+				f'{i}. {await _describe_round_row(row, session)} ({row["distance"] / 1000:,.3f} km)'
 			)
 		parts.append('\n'.join(closest_submissions_lines))
 
@@ -191,7 +203,7 @@ class TPGWrapped:
 		highest_rank = self.user_submissions.sort_values('place').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank.iterrows(), 1):
 			highest_rank_lines.append(
-				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {await describe_row(row, session)} ({row["place"]})'
+				f'{i}. {await _describe_round_row(row, session)} ({row["place"]})'
 			)
 		parts.append('\n'.join(highest_rank_lines))
 
@@ -199,7 +211,7 @@ class TPGWrapped:
 		highest_rank_pct = self.user_submissions.sort_values('place_percent').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
 			highest_rank_pct_lines.append(
-				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {await describe_row(row, session)} ({row["place_percent"]:%})'
+				f'{i}. {await _describe_round_row(row, session)} ({row["place_percent"]:%})'
 			)
 		parts.append('\n'.join(highest_rank_pct_lines))
 
@@ -209,7 +221,7 @@ class TPGWrapped:
 		)
 		for i, (_, row) in enumerate(most_points.iterrows(), 1):
 			most_points_lines.append(
-				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {await describe_row(row, session)} ({row["score"]:.2f})'
+				f'{i}. {await _describe_round_row(row, session)} ({row["score"]:.2f})'
 			)
 		parts.append('\n'.join(most_points_lines))
 
@@ -227,23 +239,10 @@ class TPGWrapped:
 def get_flag_emoji(country_name: str | None) -> str | None:
 	if pandas.isna(country_name):
 		return '🏳️'
-	others = {
-		# Mapping some things manually because GADM has older names for things, or iso-codes doesn't have something as a common name that you would expect it to, or some other weird cases. Please don't cancel me for any of this
-		'Northern Cyprus': None,  # eh, GADM has it there separately, how would you really emoji that
-		'Democratic Republic of the Congo': '🇨🇩',
-		'Swaziland': '🇸🇿',
-		'Turkey': '🇹🇷',
-	}
-	if country_name in others:
-		return others[country_name]
-	try:
-		countries = pycountry.countries.search_fuzzy(country_name)
-	except LookupError:
-		logger.warning('Could not find country %s', country_name)
-		return None
-	if not countries:
-		return None
-	return getattr(countries[0], 'flag', None)
+	cc = country_name_to_code(country_name)
+	if not cc:
+		return ''
+	return _to_flag_emoji(cc)
 
 
 async def add_countries_etc_from_gadm(submissions: geopandas.GeoDataFrame, settings: Settings):
@@ -251,8 +250,8 @@ async def add_countries_etc_from_gadm(submissions: geopandas.GeoDataFrame, setti
 	if settings.gadm_0_path:
 		gadm_0 = await read_geodataframe_async(settings.gadm_0_path)
 		submissions['country'] = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
+		submissions['cc'] = submissions['country'].map(country_name_to_code)  # type: ignore[overload] #Stop being stupid, pyright
 		# TODO: Where country is null, try Nominatim instead
-		submissions['flag'] = submissions['country'].map(get_flag_emoji)  # type: ignore[overload] #what?
 	if settings.gadm_1_path:
 		gadm_1 = await read_geodataframe_async(settings.gadm_1_path)
 		submissions['oblast'] = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
@@ -297,7 +296,7 @@ async def main() -> None:
 		submissions['round'].max(),
 	)
 
-	submissions = submissions.rename(columns={'country': 'target_country'})
+	submissions['target_cc'] = submissions.pop('country').fillna('XW')
 	submissions = submissions[submissions['round'] >= 215]
 	submissions['place_percent'] = submissions['place'] / submissions['total_subs']
 	submissions['first_use'] = ~submissions.duplicated(['latitude', 'longitude'], keep='first')

@@ -1,13 +1,19 @@
 """I couldn't think of what to categorize these functions as sorry"""
 
+import logging
+from functools import cache
 from typing import TYPE_CHECKING
+
+import pandas
+import pycountry
 
 from lib.reverse_geocode import reverse_geocode_address
 
 if TYPE_CHECKING:
-	import pandas
 	from aiohttp import ClientSession
 	from shapely import Point
+
+logger = logging.getLogger(__name__)
 
 
 def format_xy(x: float, y: float) -> str:
@@ -17,6 +23,7 @@ def format_xy(x: float, y: float) -> str:
 
 def format_point(p: 'Point') -> str:
 	return format_xy(p.x, p.y)
+
 
 async def describe_coord(lat: float, lng: float, session: 'ClientSession') -> str:
 	address = await reverse_geocode_address(lat, lng, session)
@@ -31,6 +38,7 @@ async def describe_coord(lat: float, lng: float, session: 'ClientSession') -> st
 async def describe_point(p: 'Point', session: 'ClientSession') -> str:
 	return await describe_coord(p.y, p.x, session)
 
+
 async def describe_row(row: 'pandas.Series', session: 'ClientSession') -> str:
 	"""Describes a row of a DataFrame that is expected to have "latitude" and "longitude" columns, or a geometry."""
 	geometry = row.get('geometry')
@@ -42,3 +50,37 @@ async def describe_row(row: 'pandas.Series', session: 'ClientSession') -> str:
 		lat = row['latitude']
 
 	return await describe_coord(lat, lng, session)
+
+
+@cache
+def country_name_to_code(country_name: str | None) -> str | None:
+	"""Converts a country name to an ISO 3166-1 alpha-2 code, useful for GADM etc
+
+	Returns:
+		Uppercase country code, or None if the country is unknown"""
+	if pandas.isna(country_name):
+		return None
+	others = {
+		# Mapping some things manually because GADM has older names for things, or iso-codes doesn't have something as a common name that you would expect it to, or some other weird cases. Please don't cancel me for any of this
+		'Northern Cyprus': None,  # eh, GADM has it there separately, whaddya do
+		'Democratic Republic of the Congo': 'CD',
+		'Swaziland': 'SZ',
+		'Turkey': 'TR',
+	}
+	if country_name in others:
+		return others[country_name]
+	try:
+		countries = pycountry.countries.search_fuzzy(country_name)
+	except LookupError:
+		logger.warning('Could not find country %s', country_name)
+		return None
+	if not countries:
+		return None
+	if len(countries) > 1:
+		logger.info(
+			'pycountry search_fuzzy for %s returned %d matches: %s, using first match',
+			country_name,
+			len(countries),
+			countries,
+		)
+	return getattr(countries[0], 'alpha_2', None)
