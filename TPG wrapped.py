@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
-from functools import cache
+from functools import cache, cached_property
 
 import geopandas
 import pandas
@@ -24,113 +24,148 @@ def _to_flag_emoji(cc: str):
 	return ''.join(chr(ord(c) + (ord('🇦') - ord('A'))) for c in cc)
 
 
-def get_tpg_wrapped(
-	name: str, username: str, submissions: geopandas.GeoDataFrame, rows_shown: int = 5
-):
-	# Not finished yet, and also messy as all fuck
-	user_submissions = submissions[submissions['username'] == username].copy()
-	first_usages = user_submissions[user_submissions['first_use']]
+class TPGWrapped:
+	"""Has properties for various parts of the TPG wrapped, holds stuff, outputs text, just felt like this should be a class, etc. Not necessarily finished yet"""
 
-	unique_countries = user_submissions['flag'].fillna(user_submissions['country']).unique()
-	full_subdivs = pandas.Series(
-		list(
-			zip(
-				user_submissions['country'].fillna(''),
-				user_submissions['oblast'].fillna(''),
-				strict=True,
+	def __init__(
+		self, name: str, username: str, submissions: geopandas.GeoDataFrame, rows_shown: int = 5
+	):
+		self.name = name
+		self.username = username
+		self.submissions = submissions
+		self.rows_shown = rows_shown
+
+		self.user_submissions = submissions[submissions['username'] == username].copy()
+		self.first_usages = self.user_submissions[self.user_submissions['first_use']]
+		times_used = (
+			self.user_submissions.groupby(['latitude', 'longitude'], sort=False).size().to_dict()
+		)
+		self.user_submissions['times_used'] = self.user_submissions.apply(
+			lambda row: times_used.get((row['latitude'], row['longitude'])),  # type: ignore[overload]
+			axis='columns',
+		)
+
+	@cached_property
+	def unique_country_flags(self):
+		"""Returns flags, but the names of countries/territories if they're something that doesn't have a flag"""
+		return self.user_submissions['flag'].fillna(self.user_submissions['country']).unique()
+
+	@cached_property
+	def unique_subdivisions(self):
+		"""Returns subdivisions qualified with the country as a tuple, i.e. (country, sub), beware of ('', '')"""
+		full_subdivs = pandas.Series(
+			list(
+				zip(
+					self.user_submissions['country'].fillna(''),
+					self.user_submissions['oblast'].fillna(''),
+					strict=True,
+				)
+			),
+			index=self.user_submissions.index,
+		)
+		return full_subdivs.dropna().unique()
+
+	@property
+	def unique_subdivisions_formatted(self):
+		return ', '.join(cs[1] for cs in self.unique_subdivisions if cs != ('', ''))
+
+	@property
+	def average_point(self):
+		return circular_mean_points(self.first_usages.geometry.to_numpy())
+
+	def to_text(self):
+		parts = [
+			f"{self.name}'s TPG Wrapped for Season 2",
+			f'Number of unique photos: {self.first_usages.index.size}\n'
+			+ f'Unique countries: {len(self.unique_country_flags)} {" ".join(self.unique_country_flags)}\n'
+			+ f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
+			# Average ranking
+		]
+
+		average_point = self.average_point
+		parts.append(f'Average submission: {average_point.y},{average_point.x}')
+		# TOOD: Reverse geocode average point, average point weighted by resubmissions too
+
+		most_used = (
+			self.user_submissions[self.user_submissions['first_use']]
+			.sort_values('times_used', ascending=False)
+			.head(self.rows_shown)
+		)
+		most_used_lines = ['Most submitted locations:']
+		for i, (_, row) in enumerate(most_used.iterrows(), 1):
+			most_used_lines.append(f'{i}. {row["description"]} ({row["times_used"]} times)')
+		parts.append('\n'.join(most_used_lines))
+
+		# TODO: Move logic here into properties
+		country_usage_lines = ['Most submitted countries:']
+		country_usage = self.first_usages.groupby('country', dropna=False, sort=False).size()
+		most_used_countries = country_usage.sort_values(ascending=False).head(self.rows_shown)
+		for i, (country, usage) in enumerate(most_used_countries.items(), 1):
+			if pandas.isna(country):  # type: ignore[argumentType] #what the hell
+				country_usage_lines.append(f'{i}. <unknown> ({usage} times)')
+			else:
+				country_usage_lines.append(
+					f'{i}. {get_flag_emoji(country)} {country} ({usage} times)'
+				)
+		parts.append('\n'.join(country_usage_lines))
+
+		subdiv_usage_lines = ['Most submitted subdivisions:']
+		subdiv_usage = self.user_submissions.groupby(
+			['country', 'oblast'], dropna=False, sort=False
+		).size()
+		most_used_subdivs = subdiv_usage.sort_values(ascending=False).head(self.rows_shown)
+		for i, ((country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
+			if pandas.isna(country):  # type: ignore[argumentType]
+				subdiv_usage_lines.append(f'{i}. <unknown> ({usage} times)')
+			else:
+				subdiv_usage_lines.append(
+					f'{i}. {get_flag_emoji(country)} {subdiv}, {country} ({usage} times)'
+				)
+		parts.append('\n'.join(subdiv_usage_lines))
+
+		# Most consecutive same photos (probably won't try doing this)
+		# Most consecutive unique photos
+		# Most consecutive unique countries
+		# Most obscure countries submitted
+		# Most obscure subdivisions submitted
+		# Most unique locations
+		# Least unique locations
+
+		closest_submissions_lines = ['Closest submissions:']
+		closest_submissions = self.user_submissions.sort_values('distance').head(self.rows_shown)
+		for i, (_, row) in enumerate(closest_submissions.iterrows(), 1):
+			closest_submissions_lines.append(
+				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["distance"] / 1000:,.3f} km)'
 			)
-		),
-		index=user_submissions.index,
-	)
-	unique_subdivs = full_subdivs.dropna().unique()
-	unique_subdivs_formatted = ', '.join(cs[1] for cs in unique_subdivs if cs != ('', ''))
-	parts = [
-		f"{name}'s TPG Wrapped for Season 2",
-		f'Number of unique photos: {first_usages.index.size}\n'
-		+ f'Unique countries: {len(unique_countries)} {" ".join(unique_countries)}\n'
-		+ f'Unique subdivisions: {len(unique_subdivs)} ({unique_subdivs_formatted})',
-	]
+		parts.append('\n'.join(closest_submissions_lines))
 
-	average_point = circular_mean_points(first_usages.geometry.to_numpy())
-	parts.append(f'Average submission: {average_point.y},{average_point.x}')
-
-	times_used = user_submissions.groupby(['latitude', 'longitude'], sort=False).size().to_dict()
-	user_submissions['times_used'] = user_submissions.apply(
-		lambda row: times_used.get((row['latitude'], row['longitude'])),  # type: ignore[overload]
-		axis='columns',
-	)
-	most_used = (
-		user_submissions[user_submissions['first_use']]
-		.sort_values('times_used', ascending=False)
-		.head(rows_shown)
-	)
-	most_used_lines = ['Most submitted locations:']
-	for i, (_, row) in enumerate(most_used.iterrows(), 1):
-		most_used_lines.append(f'{i}. {row["description"]} ({row["times_used"]} times)')
-	parts.append('\n'.join(most_used_lines))
-
-	country_usage_lines = ['Most submitted countries:']
-	country_usage = first_usages.groupby('country', dropna=False, sort=False).size()
-	most_used_countries = country_usage.sort_values(ascending=False).head(rows_shown)
-	for i, (country, usage) in enumerate(most_used_countries.items(), 1):
-		if pandas.isna(country):  # type: ignore[argumentType] #what the hell
-			country_usage_lines.append(f'{i}. <unknown> ({usage} times)')
-		else:
-			country_usage_lines.append(f'{i}. {get_flag_emoji(country)} {country} ({usage} times)')
-	parts.append('\n'.join(country_usage_lines))
-
-	subdiv_usage_lines = ['Most submitted subdivisions:']
-	subdiv_usage = user_submissions.groupby(['country', 'oblast'], dropna=False, sort=False).size()
-	most_used_subdivs = subdiv_usage.sort_values(ascending=False).head(rows_shown)
-	for i, ((country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
-		if pandas.isna(country):  # type: ignore[argumentType]
-			subdiv_usage_lines.append(f'{i}. <unknown> ({usage} times)')
-		else:
-			subdiv_usage_lines.append(
-				f'{i}. {get_flag_emoji(country)} {subdiv}, {country} ({usage} times)'
+		highest_rank_lines = ['Highest rank:']
+		highest_rank = self.user_submissions.sort_values('place').head(self.rows_shown)
+		for i, (_, row) in enumerate(highest_rank.iterrows(), 1):
+			highest_rank_lines.append(
+				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["place"]})'
 			)
-	parts.append('\n'.join(subdiv_usage_lines))
+		parts.append('\n'.join(highest_rank_lines))
 
-	# Most consecutive same photos (probably won't try doing this)
-	# Most consecutive unique photos
-	# Most consecutive unique countries
-	# Most obscure countries submitted
-	# Most obscure subdivisions submitted
-	# Most unique locations
-	# Least unique locations
+		highest_rank_pct_lines = ['Highest rank %:']
+		highest_rank_pct = self.user_submissions.sort_values('place_percent').head(self.rows_shown)
+		for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
+			highest_rank_pct_lines.append(
+				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["place_percent"]:%})'
+			)
+		parts.append('\n'.join(highest_rank_pct_lines))
 
-	closest_submissions_lines = ['Closest submissions:']
-	closest_submissions = user_submissions.sort_values('distance').head(rows_shown)
-	for i, (_, row) in enumerate(closest_submissions.iterrows(), 1):
-		closest_submissions_lines.append(
-			f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["distance"] / 1000:,.3f} km)'
+		most_points_lines = ['Most points:']
+		most_points = self.user_submissions.sort_values('score', ascending=False).head(
+			self.rows_shown
 		)
-	parts.append('\n'.join(closest_submissions_lines))
+		for i, (_, row) in enumerate(most_points.iterrows(), 1):
+			most_points_lines.append(
+				f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["score"]:.2f})'
+			)
+		parts.append('\n'.join(most_points_lines))
 
-	highest_rank_lines = ['Highest rank:']
-	highest_rank = user_submissions.sort_values('place').head(rows_shown)
-	for i, (_, row) in enumerate(highest_rank.iterrows(), 1):
-		highest_rank_lines.append(
-			f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["place"]})'
-		)
-	parts.append('\n'.join(highest_rank_lines))
-
-	highest_rank_pct_lines = ['Highest rank %:']
-	highest_rank_pct = user_submissions.sort_values('place_percent').head(rows_shown)
-	for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
-		highest_rank_pct_lines.append(
-			f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["place_percent"]:%})'
-		)
-	parts.append('\n'.join(highest_rank_pct_lines))
-
-	most_points_lines = ['Most points:']
-	most_points = user_submissions.sort_values('score', ascending=False).head(rows_shown)
-	for i, (_, row) in enumerate(most_points.iterrows(), 1):
-		most_points_lines.append(
-			f'{i}. Round {row["round"]} {_to_flag_emoji(row["target_country"])}: {row["description"]} ({row["score"]:.2f})'
-		)
-	parts.append('\n'.join(most_points_lines))
-	return '\n\n'.join(parts)
+		return '\n\n'.join(parts)
 
 
 def _describe_row(row: pandas.Series):
@@ -231,10 +266,10 @@ def main() -> None:
 				submissions[submissions['username'] == username].first_valid_index(), 'name'
 			]
 		)
-		wrapped = get_tpg_wrapped(name, username, submissions)
+		wrapped = TPGWrapped(name, username, submissions)
 		if settings.tpg_wrapped_output_path:
-			path = settings.tpg_wrapped_output_path / f'{username}.txt'
-			path.write_text(wrapped, 'utf-8')
+			path = settings.tpg_wrapped_output_path / f'{username.replace(".", "_")}.txt'
+			path.write_text(wrapped.to_text(), 'utf-8')
 
 
 if __name__ == '__main__':
