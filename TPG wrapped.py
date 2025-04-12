@@ -91,7 +91,7 @@ class TPGWrapped:
 
 	@property
 	def unique_subdivisions_formatted(self):
-		return ', '.join(cs[1] for cs in self.unique_subdivisions if cs != ('', ''))
+		return ', '.join(cs[1] or '??' for cs in self.unique_subdivisions if cs != ('', ''))
 
 	@property
 	def average_point(self):
@@ -261,10 +261,30 @@ async def _try_get_cc(
 		props = reverse_geo.features[0].properties.geocoding
 		cc = props.country_code
 		if cc:
-			return props.country, cc.upper(), _to_flag_emoji(cc.upper())
+			return (
+				props.country if pandas.isna(name) else name,
+				cc.upper(),
+				_to_flag_emoji(cc.upper()),
+			)
 	if row['latitude'] <= -60:
 		return 'Antarctica', 'AQ', _to_flag_emoji('AQ')
 	return name, None, name or '🏳️'
+
+
+async def _try_get_subdivision(
+	index: Hashable, row: pandas.Series, names: pandas.Series, session: ClientSession
+) -> str | None:
+	name = names[index]  # type: ignore[reportCallIssue] #blahhh
+	if not pandas.isna(name):
+		return name
+
+	reverse_geo = await reverse_geocode_components(row['latitude'], row['longitude'], session)
+	if reverse_geo and reverse_geo.features:
+		props = reverse_geo.features[0].properties.geocoding
+		subdiv = props.state
+		if subdiv:
+			return subdiv
+	return None
 
 
 async def _get_gadm_countries(
@@ -272,21 +292,29 @@ async def _get_gadm_countries(
 ):
 	gadm_0 = await read_geodataframe_async(gadm_path)
 	countries = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
-	return pandas.DataFrame.from_dict(
+	df = pandas.DataFrame.from_dict(
 		{
 			index: await _try_get_cc(index, row, countries, session)
 			for index, row in submissions.iterrows()
 		},
 		orient='index',
-		columns=['country', 'cc', 'flag'],
 	)
+	df.columns = ['country', 'cc', 'flag']
+	return df
 
 
-async def _get_gadm_subdivs(submissions: geopandas.GeoDataFrame, gadm_path: Path):
+async def _get_gadm_subdivs(
+	submissions: geopandas.GeoDataFrame, gadm_path: Path, session: ClientSession
+):
 	gadm_1 = await read_geodataframe_async(gadm_path)
 	s = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
-	s.name = 'oblast'
-	return s
+	return pandas.Series(
+		{
+			index: await _try_get_subdivision(index, row, s, session)
+			for index, row in submissions.iterrows()
+		},
+		name='oblast',
+	)
 
 
 async def _add_countries_etc_from_gadm(
@@ -296,14 +324,16 @@ async def _add_countries_etc_from_gadm(
 	if settings.gadm_0_path:
 		tasks.append(_get_gadm_countries(submissions, settings.gadm_0_path, session))
 	if settings.gadm_1_path:
-		tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path))
+		tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path, session))
 	# if settings.gadm_2_path:
 	# 	gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
 	# 	submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
 	# if settings.gadm_3_path:
 	# 	gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
 	# 	submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
-	return [await task for task in tqdm.as_completed(tasks, desc='Finding countries/subdivisions/etc.')]
+	return [
+		await task for task in tqdm.as_completed(tasks, desc='Finding countries/subdivisions/etc.')
+	]
 
 
 async def get_and_write_wrapped_for_user(
