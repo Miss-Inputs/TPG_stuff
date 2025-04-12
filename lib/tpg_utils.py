@@ -23,8 +23,10 @@ def tpg_score(distances: 'pandas.Series'):
 	# TODO: Should actually just pass in the fivek column
 	bonus.loc[distance_scores <= 0.1] = 5000
 	scores += bonus.fillna(0)
-	scores.loc[distances >= 19_995] = 5000 #Antipode 5K
-	# TODO: Handle ties (where distance is tied, all players in that tie receive the average of what the points would be)
+	scores.loc[distances >= 19_995] = 5000  # Antipode 5K
+	for _, group in scores.groupby(distance_ranks, sort=False):
+		# where distance is tied, all players in that tie receive the average of what the points would be
+		scores.loc[group.index] = group.mean()
 	return scores.round(2)
 
 

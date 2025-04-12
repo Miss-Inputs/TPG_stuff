@@ -50,6 +50,7 @@ def main() -> None:
 	submissions = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
 
 	add_scores(submissions)
+	print(submissions)
 	if settings.submissions_with_scores_path:
 		output_path = format_path(settings.submissions_with_scores_path, submissions['round'].max())
 		submissions.to_pickle(output_path)
