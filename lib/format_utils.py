@@ -1,4 +1,4 @@
-"""I couldn't think of what to categorize these functions as sorry"""
+"""Dunno what else to call this"""
 
 import logging
 from functools import cache
@@ -63,7 +63,7 @@ def country_name_to_code(country_name: str | None) -> str | None:
 	others = {
 		# Mapping some things manually because GADM has older names for things, or iso-codes doesn't have something as a common name that you would expect it to, or some other weird cases. Please don't cancel me for any of this
 		'Democratic Republic of the Congo': 'CD',
-		'Kosovo': 'XK', #pycountry will simply return Serbia from the fuzzy search…
+		'Kosovo': 'XK',  # pycountry will simply return Serbia from the fuzzy search…
 		'Northern Cyprus': None,  # eh, GADM has it there separately, whaddya do
 		'Swaziland': 'SZ',
 		'Turkey': 'TR',
@@ -88,3 +88,16 @@ def country_name_to_code(country_name: str | None) -> str | None:
 			countries,
 		)
 	return getattr(countries[0], 'alpha_2', None)
+
+
+def get_ordinal(n: int) -> str:
+	if 10 <= n % 100 <= 20:
+		return 'th'
+	return {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+
+def format_ordinal(n: float) -> str:
+	if not n.is_integer():
+		#meh
+		return f'{n:.2f}th'
+	n = int(n)
+	return f'{n}{get_ordinal(n)}'

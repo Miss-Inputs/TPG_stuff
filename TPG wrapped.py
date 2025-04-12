@@ -12,13 +12,13 @@ import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
 
+from lib.format_utils import country_name_to_code, describe_row, format_ordinal, format_point
 from lib.geo_utils import circular_mean_points
 from lib.io_utils import (
 	latest_file_matching_format_pattern,
 	read_dataframe_pickle_async,
 	read_geodataframe_async,
 )
-from lib.other_utils import country_name_to_code, describe_row, format_point
 from lib.reverse_geocode import (
 	reverse_geocode_address,
 	reverse_geocode_components,
@@ -108,9 +108,9 @@ class TPGWrapped:
 
 	def _most_used_countries_text(self, *, unique_locs: bool = False):
 		country_usage_lines = [
-			'Most submitted countries of unique locations:'
+			'Most of your unique photos were from these countries:'  # Hmm I dunno if I like the wording here
 			if unique_locs
-			else 'Most submitted countries:'
+			else 'You were most often submitting photos from these countries:'
 		]
 		most_used_countries = self.most_used_unique_countries(unique_locs=unique_locs)
 		for i, ((flag, country), usage) in enumerate(most_used_countries.items(), 1):  # type: ignore[reportGeneralTypeIssues]
@@ -124,26 +124,23 @@ class TPGWrapped:
 		other_submissions = self.submissions[self.submissions['username'] != 'username']
 		counts = other_submissions[['country', 'flag']].value_counts(sort=True, ascending=True)
 		assert isinstance(counts.index, pandas.MultiIndex), type(counts.index)
-		counts = counts[
-			counts.index.levels[0].isin(self.user_submissions['country'].dropna().unique())
-		]
+		counts = counts[counts.index.isin(self.user_submissions['country'].dropna().unique(), 0)]
 		return counts.head(self.rows_shown)
 
-	async def to_text(self, session: ClientSession):
-		"""session is used here for geocoding"""
-		parts = [f"{self.name}'s TPG Wrapped for Season 2"]
+	def _opening_text(self):
 		countries_formatted = ' '.join(self.unique_country_flags)
 		opening_lines = [
-			f'Rounds played this season: {self.user_submissions.index.size}',
-			f'Number of unique photos: {self.first_usages.index.size}',
-			f'Unique countries: {len(self.unique_country_flags)} {countries_formatted}',
-			f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
-			f'Average (mean) placement: {self.user_submissions["place"].mean()}',
-			f'Median placement: {self.user_submissions["place"].median()}',
-			f'Average placement percentage: {self.user_submissions["place_percent"].mean():%}',
+			f'You played {self.user_submissions.index.size} rounds this season',
+			f'and you submitted {self.first_usages.index.size} unique photos.',
+			f"You've been to {len(self.unique_country_flags)} different countries: {countries_formatted}",
+			f"You've been to {len(self.unique_subdivisions)} different subdivisions: ({self.unique_subdivisions_formatted})",
+			f'You placed {format_ordinal(self.user_submissions["place"].mean())} on average.',
+			f'Your median placement was {format_ordinal(self.user_submissions["place"].median())}.',
+			f'On average, you placed in the top {self.user_submissions["place_percent"].mean():%} of players each round.',
 		]
-		parts.append('\n'.join(opening_lines))
+		return '\n'.join(opening_lines)
 
+	async def _average_point_text(self, session: ClientSession):
 		average_point = self.average_point
 		average_point_weighted = self.average_point_weighted
 		average_point_address = await reverse_geocode_address(
@@ -153,23 +150,31 @@ class TPGWrapped:
 			average_point_weighted.y, average_point_weighted.x, session
 		)
 		average_point_lines = [
-			f'Average point of unique submissions: {format_point(average_point)}'
+			f'The average location of all your submissions is {format_point(average_point)}.'
 		]
 		if average_point_address:
-			average_point_lines.append(average_point_address)
+			average_point_lines.append(f"That's located at {average_point_address}")
 		average_point_lines.append(
 			f'Average point of all your submissions: {format_point(average_point_weighted)}'
 		)
 		if average_point_weighted_address:
-			average_point_lines.append(average_point_weighted_address)
-		parts.append('\n'.join(average_point_lines))
+			average_point_lines.append(f"That's located at {average_point_weighted_address}")
+		return '\n'.join(average_point_lines)
+
+	async def to_text(self, session: ClientSession):
+		"""session is used here for geocoding"""
+		parts = [
+			f"{self.name}'s TPG Wrapped for Season 2",
+			self._opening_text(),
+			await self._average_point_text(session),
+		]
 
 		most_used = (
 			self.user_submissions[self.user_submissions['first_use']]
 			.sort_values('times_used', ascending=False)
 			.head(self.rows_shown)
 		)
-		most_used_lines = ['Most submitted locations:']
+		most_used_lines = ['These are your favourite locations. You submitted these the most!']
 		for i, (_, row) in enumerate(most_used.iterrows(), 1):
 			most_used_lines.append(
 				f'{i}. {await describe_row(row, session)} ({row["times_used"]} times)'
@@ -182,7 +187,7 @@ class TPGWrapped:
 			)
 		)
 
-		subdiv_usage_lines = ['Most submitted subdivisions:']
+		subdiv_usage_lines = ['You were most often submitting photos from these subdivisions:']
 		subdiv_usage = self.user_submissions.groupby(
 			['flag', 'country', 'oblast'], dropna=False, sort=False
 		).size()
@@ -197,10 +202,12 @@ class TPGWrapped:
 		# Most consecutive same photos (probably won't try doing this)
 		# Most consecutive unique photos
 		# Most consecutive unique countries
-		most_obscure_countries_lines = ['Most obscure countries:']
+		most_obscure_countries_lines = [
+			'These are the most obscure countries that you submitted photos from, compared to everyone else.'
+		]
 		for i, ((country, flag), usage) in enumerate(self.most_obscure_countries().items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
 			most_obscure_countries_lines.append(
-				f'{i}. {flag} {country}, submitted by {usage} other players'
+				f'{i}. {flag} {country}, submitted by other players {usage} times'
 			)
 		parts.append('\n'.join(most_obscure_countries_lines))
 
@@ -209,24 +216,33 @@ class TPGWrapped:
 		# Most unique locations
 		# Least unique locations
 
-		closest_submissions_lines = ['Closest submissions:']
+		closest_submissions_lines = ['You got closest in these rounds:']
 		# distance here is haversine distances which TPG scoring uses. Would comparing geodesic distances be interesting?
 		closest_submissions = self.user_submissions.sort_values('distance').head(self.rows_shown)
 		for i, (_, row) in enumerate(closest_submissions.iterrows(), 1):
 			closest_submissions_lines.append(
-				f'{i}. {await _describe_round_row(row, session)} ({row["distance"] / 1000:,.3f} km)'
+				f'{i}. {await _describe_round_row(row, session)} ({row["distance"] / 1000:,.3f} km away)'
 			)
 		parts.append('\n'.join(closest_submissions_lines))
+		furthest_lines = ['But these rounds were too far away for you. :(']
+		furthest = self.user_submissions.sort_values('distance', ascending=False).head(
+			self.rows_shown
+		)
+		for i, (_, row) in enumerate(furthest.iterrows(), 1):
+			furthest_lines.append(
+				f'{i}. {await _describe_round_row(row, session)} ({row["distance"] / 1000:,.3f} km away)'
+			)
+		parts.append('\n'.join(furthest_lines))
 
-		highest_rank_lines = ['Highest placings:']
+		highest_rank_lines = ['You got the best placing on these rounds!']
 		highest_rank = self.user_submissions.sort_values('place').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank.iterrows(), 1):
 			highest_rank_lines.append(
-				f'{i}. {await _describe_round_row(row, session)} ({row["place"]})'
+				f'{i}. {await _describe_round_row(row, session)} ({format_ordinal(row["place"])})'
 			)
 		parts.append('\n'.join(highest_rank_lines))
 
-		highest_rank_pct_lines = ['Highest placing % (top % of round submissions):']
+		highest_rank_pct_lines = ['You were in the top percentage of players in these rounds.']
 		highest_rank_pct = self.user_submissions.sort_values('place_percent').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
 			highest_rank_pct_lines.append(
@@ -234,7 +250,7 @@ class TPGWrapped:
 			)
 		parts.append('\n'.join(highest_rank_pct_lines))
 
-		most_points_lines = ['Most points:']
+		most_points_lines = ['These rounds scored you the most points!']
 		most_points = self.user_submissions.sort_values('score', ascending=False).head(
 			self.rows_shown
 		)
