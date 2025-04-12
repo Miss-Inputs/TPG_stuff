@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Hashable
+from concurrent.futures import ProcessPoolExecutor
 from functools import cached_property
 from pathlib import Path, PurePath
 
@@ -320,10 +321,16 @@ async def _try_get_subdivision(
 
 
 async def _get_gadm_countries(
-	submissions: geopandas.GeoDataFrame, gadm_path: Path, session: ClientSession
+	submissions: geopandas.GeoDataFrame,
+	gadm_path: Path,
+	session: ClientSession,
+	executor: ProcessPoolExecutor,
 ):
 	gadm_0 = await read_geodataframe_async(gadm_path)
-	countries = reverse_geocode_gadm_country(submissions.geometry, gadm_0)
+	loop = asyncio.get_event_loop()
+	countries = await loop.run_in_executor(
+		executor, reverse_geocode_gadm_country, submissions.geometry, gadm_0
+	)
 	df = pandas.DataFrame.from_dict(
 		{
 			index: await _try_get_cc(index, row, countries, session)
@@ -336,10 +343,16 @@ async def _get_gadm_countries(
 
 
 async def _get_gadm_subdivs(
-	submissions: geopandas.GeoDataFrame, gadm_path: Path, session: ClientSession
+	submissions: geopandas.GeoDataFrame,
+	gadm_path: Path,
+	session: ClientSession,
+	executor: ProcessPoolExecutor,
 ):
 	gadm_1 = await read_geodataframe_async(gadm_path)
-	s = reverse_geocode_gadm_all(submissions.geometry, gadm_1, 'NAME_1')
+	loop = asyncio.get_event_loop()
+	s = await loop.run_in_executor(
+		executor, reverse_geocode_gadm_all, submissions.geometry, gadm_1, 'NAME_1'
+	)
 	return pandas.Series(
 		{
 			index: await _try_get_subdivision(index, row, s, session)
@@ -352,20 +365,22 @@ async def _get_gadm_subdivs(
 async def _add_countries_etc_from_gadm(
 	submissions: geopandas.GeoDataFrame, settings: Settings, session: ClientSession
 ):
-	tasks = []
-	if settings.gadm_0_path:
-		tasks.append(_get_gadm_countries(submissions, settings.gadm_0_path, session))
-	if settings.gadm_1_path:
-		tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path, session))
-	# if settings.gadm_2_path:
-	# 	gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
-	# 	submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
-	# if settings.gadm_3_path:
-	# 	gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
-	# 	submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
-	return [
-		await task for task in tqdm.as_completed(tasks, desc='Finding countries/subdivisions/etc.')
-	]
+	with ProcessPoolExecutor() as ppe:
+		tasks = []
+		if settings.gadm_0_path:
+			tasks.append(_get_gadm_countries(submissions, settings.gadm_0_path, session, ppe))
+		if settings.gadm_1_path:
+			tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path, session, ppe))
+		# if settings.gadm_2_path:
+		# 	gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
+		# 	submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
+		# if settings.gadm_3_path:
+		# 	gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
+		# 	submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
+		return [
+			await task
+			for task in tqdm.as_completed(tasks, desc='Finding countries/subdivisions/etc.')
+		]
 
 
 async def get_and_write_wrapped_for_user(
