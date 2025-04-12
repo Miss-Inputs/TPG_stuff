@@ -242,8 +242,17 @@ class TPGWrapped:
 				f'{i}. {await _describe_round_row(row, session)} ({format_ordinal(row["place"])})'
 			)
 		parts.append('\n'.join(highest_rank_lines))
+		lowest_rank_lines = ["But your placing wasn't so great on these rounds:"]
+		lowest_rank = self.user_submissions.sort_values('place', ascending=False).head(
+			self.rows_shown
+		)
+		for i, (_, row) in enumerate(lowest_rank.iterrows(), 1):
+			lowest_rank_lines.append(
+				f'{i}. {await _describe_round_row(row, session)} ({format_ordinal(row["place"])})'
+			)
+		parts.append('\n'.join(lowest_rank_lines))
 
-		highest_rank_pct_lines = ['You were in the top percentage of players in these rounds.']
+		highest_rank_pct_lines = ['You were in the top percentage of players in these rounds!']
 		highest_rank_pct = self.user_submissions.sort_values('place_percent').head(self.rows_shown)
 		for i, (_, row) in enumerate(highest_rank_pct.iterrows(), 1):
 			highest_rank_pct_lines.append(
@@ -260,6 +269,15 @@ class TPGWrapped:
 				f'{i}. {await _describe_round_row(row, session)} ({row["score"]:.2f})'
 			)
 		parts.append('\n'.join(most_points_lines))
+		least_points_lines = ['But these rounds were not as kind to your score.']
+		least_points = self.user_submissions.sort_values('score', ascending=True).head(
+			self.rows_shown
+		)
+		for i, (_, row) in enumerate(least_points.iterrows(), 1):
+			least_points_lines.append(
+				f'{i}. {await _describe_round_row(row, session)} ({row["score"]:.2f})'
+			)
+		parts.append('\n'.join(least_points_lines))
 
 		return '\n\n'.join(parts)
 
