@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import aiohttp
+import backoff
 import pandas
 import pydantic_core
 import requests
@@ -138,6 +139,7 @@ def reverse_geocode_address_sync(
 
 
 @alru_cache
+@backoff.on_exception(backoff.expo, aiohttp.ClientResponseError)
 async def reverse_geocode_address(
 	lat: float,
 	lng: float,
@@ -206,6 +208,7 @@ def reverse_geocode_components_sync(
 	return NominatimReverseGeocodeJSON.model_validate(j)
 
 
+@backoff.on_exception(backoff.expo, aiohttp.ClientResponseError)
 async def reverse_geocode_components(
 	lat: float,
 	lng: float,

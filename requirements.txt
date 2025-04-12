@@ -1,11 +1,12 @@
-geopandas
-shapely
-python-dotenv
-pydantic-settings
-requests
-tqdm
-scikit-learn #not using it yet whoops
-pyzstd
-pycountry
 aiohttp
 async-lru
+backoff
+geopandas
+pycountry
+pydantic-settings
+python-dotenv
+pyzstd
+requests
+scikit-learn #not using it yet whoops
+shapely
+tqdm
