@@ -2,6 +2,7 @@
 
 import logging
 from functools import cache, cached_property
+from pathlib import PurePath
 
 import geopandas
 import pandas
@@ -47,7 +48,7 @@ class TPGWrapped:
 
 	@cached_property
 	def unique_country_flags(self):
-		"""Returns flags, but the names of countries/territories if they're something that doesn't have a flag"""
+		"""Returns flags as str, but the names of countries/territories if they're something that doesn't have a flag"""
 		return self.user_submissions['flag'].fillna(self.user_submissions['country']).unique()
 
 	@cached_property
@@ -73,18 +74,30 @@ class TPGWrapped:
 	def average_point(self):
 		return circular_mean_points(self.first_usages.geometry.to_numpy())
 
+	@property
+	def average_point_weighted(self):
+		return circular_mean_points(self.user_submissions.geometry.to_numpy())
+
 	def to_text(self):
 		parts = [
 			f"{self.name}'s TPG Wrapped for Season 2",
-			f'Number of unique photos: {self.first_usages.index.size}\n'
+			f'Rounds played this season: {self.user_submissions.index.size}\n'
+			+ f'Number of unique photos: {self.first_usages.index.size}\n'
 			+ f'Unique countries: {len(self.unique_country_flags)} {" ".join(self.unique_country_flags)}\n'
 			+ f'Unique subdivisions: {len(self.unique_subdivisions)} ({self.unique_subdivisions_formatted})',
 			# Average ranking
 		]
 
 		average_point = self.average_point
-		parts.append(f'Average submission: {average_point.y},{average_point.x}')
-		# TOOD: Reverse geocode average point, average point weighted by resubmissions too
+		average_point_weighted = self.average_point_weighted
+		average_point_lines = [
+			f'Average submission of unique submissions: {average_point.y},{average_point.x}'
+		]
+		average_point_lines.append(
+			f'Average point of all your submissions: {average_point_weighted.y},{average_point_weighted.x}:'
+		)
+		parts.append('\n'.join(average_point_lines))
+		# TOOD: Reverse geocode average point
 
 		most_used = (
 			self.user_submissions[self.user_submissions['first_use']]
@@ -97,6 +110,7 @@ class TPGWrapped:
 		parts.append('\n'.join(most_used_lines))
 
 		# TODO: Move logic here into properties
+		# TODO: The people want counts of countries across both unique locations and all submissions
 		country_usage_lines = ['Most submitted countries:']
 		country_usage = self.first_usages.groupby('country', dropna=False, sort=False).size()
 		most_used_countries = country_usage.sort_values(ascending=False).head(self.rows_shown)
@@ -166,6 +180,13 @@ class TPGWrapped:
 		parts.append('\n'.join(most_points_lines))
 
 		return '\n\n'.join(parts)
+
+	@property
+	def output_filename(self) -> PurePath:
+		name = self.username
+		if name[0] == '.':
+			name = f' {name[1:]}'
+		return PurePath(name)
 
 
 def _describe_row(row: pandas.Series):
@@ -259,16 +280,14 @@ def main() -> None:
 	)
 	add_countries_etc_from_gadm(submissions, settings)
 
+	names = submissions.drop_duplicates('username').set_index('username')['name'].to_dict()
 	usernames = submissions['username'].unique()
 	for username in tqdm(usernames, 'Creating wrappeds'):
-		name = str(
-			submissions.loc[
-				submissions[submissions['username'] == username].first_valid_index(), 'name'
-			]
-		)
+		name = names.get(username, username)
 		wrapped = TPGWrapped(name, username, submissions)
+		# TODO: Ideally this should be async
 		if settings.tpg_wrapped_output_path:
-			path = settings.tpg_wrapped_output_path / f'{username.replace(".", "_")}.txt'
+			path = settings.tpg_wrapped_output_path / wrapped.output_filename.with_suffix('.txt')
 			path.write_text(wrapped.to_text(), 'utf-8')
 
 
