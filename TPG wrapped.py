@@ -122,7 +122,7 @@ class TPGWrapped:
 		return '\n'.join(country_usage_lines)
 
 	def most_obscure_countries(self):
-		other_submissions = self.submissions[self.submissions['username'] != 'username']
+		other_submissions = self.submissions[self.submissions['username'] != self.username]
 		counts = other_submissions[['country', 'flag']].value_counts(sort=True, ascending=True)
 		assert isinstance(counts.index, pandas.MultiIndex), type(counts.index)
 		counts = counts[counts.index.isin(self.user_submissions['country'].dropna().unique(), 0)]
