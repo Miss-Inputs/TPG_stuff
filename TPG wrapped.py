@@ -123,10 +123,16 @@ class TPGWrapped:
 
 	def most_obscure_countries(self):
 		other_submissions = self.submissions[self.submissions['username'] != self.username]
-		counts = other_submissions[['country', 'flag']].value_counts(sort=True, ascending=True)
+		counts = other_submissions[['country', 'flag']].value_counts(
+			sort=False
+		)  # Don't bother sorting because we have to do that later anyway
 		assert isinstance(counts.index, pandas.MultiIndex), type(counts.index)
 		counts = counts[counts.index.isin(self.user_submissions['country'].dropna().unique(), 0)]
-		return counts.head(self.rows_shown)
+		# Bleh there was probably a better way to get unique combinations of country/flag in user_submissions but I just woke up and I'm sleepy zzz
+		uniques = self.user_submissions[['country', 'flag']].dropna().value_counts(sort=False).index
+		zero_counts = pandas.Series(dict.fromkeys(uniques, 0))
+		counts = pandas.concat([counts, zero_counts[~zero_counts.index.isin(counts.index)]])
+		return counts.sort_values(ascending=True).head(self.rows_shown)
 
 	def _opening_text(self):
 		countries_formatted = ' '.join(self.unique_country_flags)
