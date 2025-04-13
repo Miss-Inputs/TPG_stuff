@@ -150,73 +150,28 @@ class TPGWrapped:
 		average_point_weighted_address = await reverse_geocode_address(
 			average_point_weighted.y, average_point_weighted.x, session
 		)
-		average_point_lines = [
-			f'The average location of all your submissions is {format_point(average_point)}.'
-		]
+		lines = [f'The average location of all your submissions is {format_point(average_point)}.']
 		if average_point_address:
-			average_point_lines.append(f"That's located at {average_point_address}")
-		average_point_lines.append(
+			lines.append(f"That's located at {average_point_address}")
+		lines.append(
 			f'Average point of all your submissions: {format_point(average_point_weighted)}'
 		)
 		if average_point_weighted_address:
-			average_point_lines.append(f"That's located at {average_point_weighted_address}")
-		return '\n'.join(average_point_lines)
+			lines.append(f"That's located at {average_point_weighted_address}")
+		return '\n'.join(lines)
 
-	async def to_text(self, session: ClientSession):
-		"""session is used here for geocoding"""
-		parts = [
-			f"{self.name}'s TPG Wrapped for Season 2",
-			self._opening_text(),
-			await self._average_point_text(session),
-		]
-
+	async def _most_used_text(self, session: ClientSession):
 		most_used = (
 			self.user_submissions[self.user_submissions['first_use']]
 			.sort_values('times_used', ascending=False)
 			.head(self.rows_shown)
 		)
-		most_used_lines = ['These are your favourite locations. You submitted these the most!']
+		lines = ['These are your favourite locations. You submitted these the most!']
 		for i, (_, row) in enumerate(most_used.iterrows(), 1):
-			most_used_lines.append(
-				f'{i}. {await describe_row(row, session)} ({row["times_used"]} times)'
-			)
-		parts.extend(
-			(
-				'\n'.join(most_used_lines),
-				self._most_used_countries_text(),
-				self._most_used_countries_text(unique_locs=True),
-			)
-		)
+			lines.append(f'{i}. {await describe_row(row, session)} ({row["times_used"]} times)')
+		return '\n'.join(lines)
 
-		subdiv_usage_lines = ['You were most often submitting photos from these subdivisions:']
-		subdiv_usage = self.user_submissions.groupby(
-			['flag', 'country', 'oblast'], dropna=False, sort=False
-		).size()
-		most_used_subdivs = subdiv_usage.sort_values(ascending=False).head(self.rows_shown)
-		for i, ((flag, country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
-			if pandas.isna(country):  # type: ignore[argumentType]
-				subdiv_usage_lines.append(f'{i}. <unknown> ({usage} times)')
-			else:
-				subdiv_usage_lines.append(f'{i}. {flag} {subdiv}, {country} ({usage} times)')
-		parts.append('\n'.join(subdiv_usage_lines))
-
-		# Most consecutive same photos (probably won't try doing this)
-		# Most consecutive unique photos
-		# Most consecutive unique countries
-		most_obscure_countries_lines = [
-			'These are the most obscure countries that you submitted photos from, compared to everyone else.'
-		]
-		for i, ((country, flag), usage) in enumerate(self.most_obscure_countries().items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
-			most_obscure_countries_lines.append(
-				f'{i}. {flag} {country}, submitted by other players {usage} times'
-			)
-		parts.append('\n'.join(most_obscure_countries_lines))
-
-		# Most obscure countries submitted
-		# Most obscure subdivisions submitted
-		# Most unique locations
-		# Least unique locations
-
+	async def _best_rounds_text(self, session: ClientSession, parts: list[str]):
 		closest_submissions_lines = ['You got closest in these rounds:']
 		# distance here is haversine distances which TPG scoring uses. Would comparing geodesic distances be interesting?
 		closest_submissions = self.user_submissions.sort_values('distance').head(self.rows_shown)
@@ -278,6 +233,53 @@ class TPGWrapped:
 				f'{i}. {await _describe_round_row(row, session)} ({row["score"]:.2f})'
 			)
 		parts.append('\n'.join(least_points_lines))
+
+	async def to_text(self, session: ClientSession):
+		"""session is used here for geocoding"""
+		parts = [
+			f"{self.name}'s TPG Wrapped for Season 2",
+			self._opening_text(),
+			await self._average_point_text(session),
+		]
+
+		parts.extend(
+			(
+				await self._most_used_text(session),
+				self._most_used_countries_text(),
+				self._most_used_countries_text(unique_locs=True),
+			)
+		)
+
+		subdiv_usage_lines = ['You were most often submitting photos from these subdivisions:']
+		subdiv_usage = self.user_submissions.groupby(
+			['flag', 'country', 'oblast'], dropna=False, sort=False
+		).size()
+		most_used_subdivs = subdiv_usage.sort_values(ascending=False).head(self.rows_shown)
+		for i, ((flag, country, subdiv), usage) in enumerate(most_used_subdivs.items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
+			if pandas.isna(country):  # type: ignore[argumentType]
+				subdiv_usage_lines.append(f'{i}. <unknown> ({usage} times)')
+			else:
+				subdiv_usage_lines.append(f'{i}. {flag} {subdiv}, {country} ({usage} times)')
+		parts.append('\n'.join(subdiv_usage_lines))
+
+		# Most consecutive same photos (probably won't try doing this)
+		# Most consecutive unique photos
+		# Most consecutive unique countries
+		most_obscure_countries_lines = [
+			'These are the most obscure countries that you submitted photos from, compared to everyone else.'
+		]
+		for i, ((country, flag), usage) in enumerate(self.most_obscure_countries().items(), 1):  # type: ignore[reportGeneralTypeIssues] #aaaa
+			most_obscure_countries_lines.append(
+				f'{i}. {flag} {country}, submitted by other players {usage} times'
+			)
+		parts.append('\n'.join(most_obscure_countries_lines))
+
+		# Most obscure countries submitted
+		# Most obscure subdivisions submitted
+		# Most unique locations
+		# Least unique locations
+
+		await self._best_rounds_text(session, parts)
 
 		return '\n\n'.join(parts)
 
