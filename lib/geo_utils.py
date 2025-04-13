@@ -253,7 +253,7 @@ def get_points_uniqueness(points: geopandas.GeoSeries):
 		TypeError: If points does not contain points.
 
 	Returns:
-		(distances, closest indexes)
+		(distances in metres, closest indexes)
 	"""
 	distances: dict[Hashable, float] = {}
 	closest_indexes: dict[Hashable, Hashable] = {}
@@ -262,4 +262,24 @@ def get_points_uniqueness(points: geopandas.GeoSeries):
 			raise TypeError(type(point))
 		others = points.drop(index=index)
 		distances[index], closest_indexes[index] = get_point_uniqueness(point, others)
+	return pandas.Series(distances), pandas.Series(closest_indexes)
+
+
+def get_points_uniqueness_in_row(points: geopandas.GeoDataFrame, unique_row: Hashable):
+	"""Gets the minimum distance to other points and index of closest point for each point in points, only comparing to rows where a value in a certain column is different.
+
+	Raises:
+		TypeError: If points does not contain points.
+
+	Returns:
+		(distances in metres, closest indexes)
+	"""
+	distances: dict[Hashable, float] = {}
+	closest_indexes: dict[Hashable, Hashable] = {}
+	for index, row in tqdm(points.iterrows(), 'Finding uniqueness', points.size):
+		point = row.geometry
+		if not isinstance(point, shapely.Point):
+			raise TypeError(type(point))
+		others = points[points[unique_row] != points.at[index, unique_row]]
+		distances[index], closest_indexes[index] = get_point_uniqueness(point, others.geometry)
 	return pandas.Series(distances), pandas.Series(closest_indexes)

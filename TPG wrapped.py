@@ -14,7 +14,7 @@ from aiohttp import ClientSession
 from tqdm.auto import tqdm
 
 from lib.format_utils import country_name_to_code, describe_row, format_ordinal, format_point
-from lib.geo_utils import circular_mean_points
+from lib.geo_utils import circular_mean_points, get_points_uniqueness_in_row
 from lib.io_utils import (
 	latest_file_matching_format_pattern,
 	read_dataframe_pickle_async,
@@ -240,6 +240,16 @@ class TPGWrapped:
 			)
 		parts.append('\n'.join(least_points_lines))
 
+	async def _describe_unique_locs(
+		self, lines: list[str], rows: pandas.DataFrame, session: ClientSession
+	):
+		for i, (_, row) in enumerate(rows.iterrows(), 1):
+			lines.append(f'{i}. {await describe_row(row, session)}')
+			closest_row = self.submissions.loc[row['closest']]
+			lines.append(
+				f"That was {row['uniqueness'] / 1000:,.3f} km away from the closest, {closest_row['name']}'s photo in {await describe_row(closest_row, session)}"
+			)
+
 	async def to_text(self, session: ClientSession):
 		"""session is used here for geocoding"""
 		parts = [
@@ -279,11 +289,20 @@ class TPGWrapped:
 				f'{i}. {flag} {country}, submitted by other players {usage} times'
 			)
 		parts.append('\n'.join(most_obscure_countries_lines))
-
-		# Most obscure countries submitted
 		# Most obscure subdivisions submitted
-		# Most unique locations
-		# Least unique locations
+
+		uniqueness_sorted = self.first_usages.sort_values('uniqueness', ascending=False)
+		my_most_unique = uniqueness_sorted.head(self.rows_shown)
+		my_least_unique = uniqueness_sorted.tail(self.rows_shown)[::-1]
+		uniqueness_lines = [
+			'These were your most unique locations, furthest away from anyone else this season. Wow!'
+		]
+		await self._describe_unique_locs(uniqueness_lines, my_most_unique, session)
+		uniqueness_lines.append(
+			"\nAnd these were your locations closest to other people's submissions."
+		)
+		await self._describe_unique_locs(uniqueness_lines, my_least_unique, session)
+		parts.append('\n'.join(uniqueness_lines))
 
 		await self._best_rounds_text(session, parts)
 
@@ -423,6 +442,14 @@ async def get_and_write_wrapped_for_user(
 		await asyncio.to_thread(path.write_text, text, 'utf-8')
 
 
+def _find_first_matching_latlong_index(row: pandas.Series, submissions: geopandas.GeoDataFrame):
+	return submissions[
+		(submissions['latitude'] == row['latitude'])
+		& (submissions['longitude'] == row['longitude'])
+		& (submissions['first_use'])
+	].first_valid_index()
+
+
 async def main() -> None:
 	settings = Settings()
 	if not settings.submissions_with_scores_path:
@@ -452,6 +479,17 @@ async def main() -> None:
 		geometry=geopandas.points_from_xy(submissions['longitude'], submissions['latitude']),
 		crs='wgs84',
 	)
+	uniqueness, closest = get_points_uniqueness_in_row(
+		submissions[submissions['first_use']], 'username'
+	)
+	submissions['uniqueness'] = {
+		index: uniqueness[_find_first_matching_latlong_index(row, submissions)]
+		for index, row in submissions.iterrows()
+	}
+	submissions['closest'] = {
+		index: closest[_find_first_matching_latlong_index(row, submissions)]
+		for index, row in submissions.iterrows()
+	}
 
 	names = submissions.drop_duplicates('username').set_index('username')['name'].to_dict()
 	usernames = submissions['username'].unique()
