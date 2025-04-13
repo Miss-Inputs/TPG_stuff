@@ -433,7 +433,7 @@ async def main() -> None:
 		path,
 		submissions['round'].max(),
 	)
-	submissions = submissions[submissions['round'] >= 215].copy()
+	submissions = submissions[submissions['round'] >= 216].copy()
 	logger.info('%d submissions for season 2', submissions.index.size)
 
 	submissions['target_cc'] = submissions.pop('country').fillna('XW')
