@@ -90,6 +90,24 @@ class TPGWrapped:
 		)
 		return full_subdivs.dropna().unique()
 
+	@cached_property
+	def unique_kabus(self):
+		"""Returns kabupatens qualified with the country as a tuple, i.e. (country, kabu), beware of ('', '')"""
+		return (
+			pandas.Series(
+				list(
+					zip(
+						self.user_submissions['country'].fillna(''),
+						self.user_submissions['kabupaten'].fillna(''),
+						strict=True,
+					)
+				),
+				index=self.user_submissions.index,
+			)
+			.dropna()
+			.unique()
+		)
+
 	@property
 	def unique_subdivisions_formatted(self):
 		return ', '.join(cs[1] or '??' for cs in self.unique_subdivisions if cs != ('', ''))
@@ -141,6 +159,7 @@ class TPGWrapped:
 			f'and you submitted {self.first_usages.index.size} unique photos.',
 			f"You've been to {len(self.unique_country_flags)} different countries: {countries_formatted}",
 			f"You've been to {len(self.unique_subdivisions)} different subdivisions: ({self.unique_subdivisions_formatted})",
+			f"You've been to {len(self.unique_kabus)} different kabupatens: ({', '.join(cs[1] or '??' for cs in self.unique_kabus if cs != ('', ''))})",
 			f'You placed {format_ordinal(self.user_submissions["place"].mean())} on average.',
 			f'Your median placement was {format_ordinal(self.user_submissions["place"].median())}.',
 			f'On average, you placed in the top {self.user_submissions["place_percent"].mean():%} of players each round.',
@@ -365,6 +384,24 @@ async def _try_get_subdivision(
 	return None
 
 
+async def _try_get_kabupaten(
+	index: Hashable, row: pandas.Series, names: pandas.Series, session: ClientSession
+) -> str | None:
+	name = names[index]  # type: ignore[reportCallIssue] #blahhh
+	if not pandas.isna(name):
+		return name
+
+	reverse_geo = await reverse_geocode_components(row['latitude'], row['longitude'], session)
+	if reverse_geo and reverse_geo.features:
+		props = reverse_geo.features[0].properties.geocoding
+		kabu = props.admin.get(
+			'level6', props.city
+		)  # level7 might also work but it's probably just the same as city
+		if kabu:
+			return kabu
+	return None
+
+
 async def _get_gadm_countries(
 	submissions: geopandas.GeoDataFrame,
 	gadm_path: Path,
@@ -407,6 +444,26 @@ async def _get_gadm_subdivs(
 	)
 
 
+async def _get_gadm_kabus(
+	submissions: geopandas.GeoDataFrame,
+	gadm_path: Path,
+	session: ClientSession,
+	executor: ProcessPoolExecutor,
+):
+	gadm_2 = await read_geodataframe_async(gadm_path)
+	loop = asyncio.get_event_loop()
+	s = await loop.run_in_executor(
+		executor, reverse_geocode_gadm_all, submissions.geometry, gadm_2, 'NAME_2'
+	)
+	return pandas.Series(
+		{
+			index: await _try_get_kabupaten(index, row, s, session)
+			for index, row in submissions.iterrows()
+		},
+		name='kabupaten',
+	)
+
+
 async def _add_countries_etc_from_gadm(
 	submissions: geopandas.GeoDataFrame, settings: Settings, session: ClientSession
 ):
@@ -416,9 +473,8 @@ async def _add_countries_etc_from_gadm(
 			tasks.append(_get_gadm_countries(submissions, settings.gadm_0_path, session, ppe))
 		if settings.gadm_1_path:
 			tasks.append(_get_gadm_subdivs(submissions, settings.gadm_1_path, session, ppe))
-		# if settings.gadm_2_path:
-		# 	gadm_2 = await read_geodataframe_async(settings.gadm_2_path)
-		# 	submissions['kabupaten'] = reverse_geocode_gadm_all(submissions.geometry, gadm_2, 'NAME_2')
+		if settings.gadm_2_path:
+			tasks.append(_get_gadm_kabus(submissions, settings.gadm_2_path, session, ppe))
 		# if settings.gadm_3_path:
 		# 	gadm_3 = await read_geodataframe_async(settings.gadm_3_path)
 		# 	submissions['barangay'] = reverse_geocode_gadm_all(submissions.geometry, gadm_3, 'NAME_3')
@@ -506,7 +562,7 @@ async def main() -> None:
 			tasks.append(
 				asyncio.create_task(
 					get_and_write_wrapped_for_user(settings, submissions, sesh, name, username),
-					name=f'fwrapped_{username}',
+					name=f'wrapped_{username}',
 				)
 			)
 		await tqdm.gather(*tasks, desc='Creating a wrapped for each user')
