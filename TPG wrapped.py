@@ -555,6 +555,10 @@ async def main() -> None:
 			[submissions, *await _add_countries_etc_from_gadm(submissions, settings, sesh)],
 			axis='columns',
 		)
+		if settings.tpg_wrapped_output_path:
+			submissions.drop(columns='geometry').to_csv(
+				settings.tpg_wrapped_output_path / 'all_rows.csv'
+			)
 		assert isinstance(submissions, geopandas.GeoDataFrame), type(submissions)
 		tasks = []
 		for username in usernames:
