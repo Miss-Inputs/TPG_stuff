@@ -153,8 +153,12 @@ def load_or_get_submissions(
 	"""
 	if not path:
 		return get_submissions(path, max_round_num)
-
-	latest_path = latest_file_matching_format_pattern(path)
+	try:
+		latest_path = latest_file_matching_format_pattern(path)
+	except ValueError:
+		#file not there
+		return get_submissions(path, max_round_num)
+	
 	if max_round_num:
 		# Ensure we create a new file if we have more rounds
 		latest_path_stem = path.stem.format(max_round_num)
