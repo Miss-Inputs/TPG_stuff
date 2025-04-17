@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 def _group_rounds(group: pandas.DataFrame):
 	first = group.iloc[0].copy()
 	rounds = sorted(group['round'].unique())
+	first['num_rounds'] = len(rounds)
 	first['round'] = ', '.join(str(n) for n in rounds)
 	first['first_round'] = rounds[0]
 	first['latest_round'] = rounds[-1]
@@ -33,6 +34,7 @@ def _add_additional_data(subs: dict[int, list[dict[str, Any]]], path: Path):
 		existing_names = {s['name'] for s in subs[round_num]}
 		existing_usernames = {s['username'] for s in subs[round_num]}
 		for sub in new_subs:
+			del sub['place'] #Will recalculate this when/if recalculating scores to avoid screwiness
 			if sub['name'] in existing_names or sub['username'] in existing_usernames:
 				# Trust the existing data if it is there
 				logger.info(
@@ -67,8 +69,9 @@ def main() -> None:
 		max_round_num = None
 
 	subs = load_or_get_submissions(settings.submissions_path, max_round_num)
-	for additional_path in additional_paths:
-		_add_additional_data(subs, additional_path)
+	if additional_paths:
+		for additional_path in additional_paths:
+			_add_additional_data(subs, additional_path)
 	rows = []
 	for round_num, round_subs in subs.items():
 		rows += [{'round': round_num, **sub, 'total_subs': len(round_subs)} for sub in round_subs]

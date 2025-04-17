@@ -3,6 +3,8 @@
 
 from typing import TYPE_CHECKING
 
+from tqdm.auto import tqdm
+
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import format_path, latest_file_matching_format_pattern, read_dataframe_pickle
 from lib.tastycheese_map import get_tpg_rounds
@@ -33,12 +35,18 @@ def add_scores(submissions: 'pandas.DataFrame'):
 
 	# should this use apply/agg? Ah well
 	submissions['score'] = [None] * submissions.index.size
-	for _, round_group in submissions.groupby(
-		'round', as_index=False, sort=False, group_keys=False
+	for round_num, round_group in tqdm(
+		submissions.groupby('round', as_index=False, sort=False, group_keys=False),
+		'Calculating scores for each round',
 	):
 		round_scores = tpg_score(round_group['distance'] / 1000)
 		round_scores.name = 'score'
 		submissions.update(round_scores)
+		if round_group['place'].hasnans:
+			tqdm.write(f'Need to recalculate places for round {round_num}')
+			ranks = round_scores.rank(method='min', ascending=False)
+			ranks.name = 'place'
+			submissions.update(ranks)
 
 
 def main() -> None:
