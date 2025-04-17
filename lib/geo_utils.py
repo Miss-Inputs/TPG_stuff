@@ -276,7 +276,7 @@ def get_points_uniqueness_in_row(points: geopandas.GeoDataFrame, unique_row: Has
 	"""
 	distances: dict[Hashable, float] = {}
 	closest_indexes: dict[Hashable, Hashable] = {}
-	for index, row in tqdm(points.iterrows(), 'Finding uniqueness', points.size):
+	for index, row in tqdm(points.iterrows(), 'Finding uniqueness', points.index.size):
 		point = row.geometry
 		if not isinstance(point, shapely.Point):
 			raise TypeError(type(point))
