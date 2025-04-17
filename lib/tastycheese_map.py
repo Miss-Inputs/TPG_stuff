@@ -156,9 +156,9 @@ def load_or_get_submissions(
 	try:
 		latest_path = latest_file_matching_format_pattern(path)
 	except ValueError:
-		#file not there
+		# file not there
 		return get_submissions(path, max_round_num)
-	
+
 	if max_round_num:
 		# Ensure we create a new file if we have more rounds
 		latest_path_stem = path.stem.format(max_round_num)
@@ -175,5 +175,23 @@ def load_or_get_submissions(
 	return subs
 
 
-# getPlayers: [{discord_id, name, username}...]
-# getUserSubmissions name={name}: [{latitude, longitude, label e.g. "Round 3", "Rounds 4, 33"}] requires a display name and not a username though
+class TPGPlayer(BaseModel):
+	discord_id: int
+	name: str
+	username: str
+
+
+_player_list_adapter = TypeAdapter(list[TPGPlayer])
+
+
+def get_players(session: requests.Session | None = None, timeout: int = 10):
+	url = 'https://tpg.tastedcheese.site/api/getPlayers/'
+	headers = {'User-Agent': user_agent}
+
+	get = session.get if session else requests.get
+	response = get(url, timeout=timeout, headers=headers)
+	response.raise_for_status()
+	return _player_list_adapter.validate_json(response.text)
+
+
+# https://tpg.tastedcheese.site/api/getUserSubmissions/?name={name}: [{latitude, longitude, label e.g. "Round 3", "Rounds 4, 33"}] requires a display name and not a username though
