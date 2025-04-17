@@ -178,7 +178,7 @@ def load_or_get_submissions(
 class TPGPlayer(BaseModel):
 	discord_id: int
 	name: str
-	username: str
+	username: str | None
 
 
 _player_list_adapter = TypeAdapter(list[TPGPlayer])
