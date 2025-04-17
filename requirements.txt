@@ -10,3 +10,4 @@ requests
 scikit-learn #not using it yet whoops
 shapely
 tqdm
+xlsxwriter

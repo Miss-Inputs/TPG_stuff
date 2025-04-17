@@ -556,9 +556,9 @@ async def main() -> None:
 			axis='columns',
 		)
 		if settings.tpg_wrapped_output_path:
-			submissions.drop(columns='geometry').to_csv(
-				settings.tpg_wrapped_output_path / 'all_rows.csv'
-			)
+			all_rows_path = settings.tpg_wrapped_output_path / 'all_rows.csv'
+			submissions.drop(columns='geometry').to_csv(all_rows_path)
+			submissions.drop(columns='geometry').to_excel(all_rows_path.with_suffix('.xlsx'))
 		assert isinstance(submissions, geopandas.GeoDataFrame), type(submissions)
 		tasks = []
 		for username in usernames:
