@@ -135,7 +135,7 @@ def get_submissions(
 	}
 
 
-_submission_json_adapter = TypeAdapter(dict[int, list[dict[str, Any]]])
+submission_json_adapter = TypeAdapter(dict[int, list[dict[str, Any]]])
 
 
 def load_or_get_submissions(
@@ -169,7 +169,7 @@ def load_or_get_submissions(
 
 	try:
 		contents = latest_path.read_bytes()
-		subs = _submission_json_adapter.validate_json(contents)
+		subs = submission_json_adapter.validate_json(contents)
 	except FileNotFoundError:
 		subs = get_submissions(path, max_round_num)
 	return subs
