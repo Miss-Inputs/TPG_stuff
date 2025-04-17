@@ -30,6 +30,19 @@ def _describe_row(index: Hashable, row: pandas.Series):
 
 	return f'{name}: {", ".join(reversed(components))} ({index})'
 
+def _calc_and_print_uniqueness(submissions: geopandas.GeoDataFrame):
+	submissions['uniqueness'], submissions['closest'] = get_points_uniqueness(submissions.geometry)
+
+	print('Most unique pic:')
+	print(submissions.loc[submissions['uniqueness'].idxmax()].to_dict())
+	print('Closest to:')
+	print(submissions.loc[submissions.loc[submissions['uniqueness'].idxmax(), 'closest']].to_dict())
+
+	print('Most unique Miss Inputs pic:')
+	my_most_unique = submissions[submissions['username'] == 'miss_inputs']['uniqueness'].idxmax()
+	print(submissions.loc[my_most_unique].to_dict())
+	print('Closest to:')
+	print(submissions.loc[submissions.loc[my_most_unique, 'closest']].to_dict())
 
 def main() -> None:
 	settings = Settings()
@@ -68,14 +81,7 @@ def main() -> None:
 		]
 	)
 	print(submissions)
-	submissions['uniqueness'], submissions['closest'] = get_points_uniqueness(submissions.geometry)
-
-	print(submissions.loc[submissions['uniqueness'].idxmax()])
-	print(submissions.loc[submissions.loc[submissions['uniqueness'].idxmax(), 'closest']])
-
-	my_most_unique = submissions[submissions['username'] == 'miss_inputs']['uniqueness'].idxmax()
-	print(submissions.loc[my_most_unique])
-	print(submissions.loc[submissions.loc[my_most_unique, 'closest']])
+	_calc_and_print_uniqueness(submissions)
 
 
 if __name__ == '__main__':
