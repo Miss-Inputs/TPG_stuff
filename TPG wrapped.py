@@ -269,7 +269,7 @@ class TPGWrapped:
 				f"That was {row['uniqueness'] / 1000:,.3f} km away from the closest, {closest_row['name']}'s photo in {await describe_row(closest_row, session)}"
 			)
 
-	async def to_text(self, session: ClientSession):
+	async def to_text(self, session: ClientSession) -> str:
 		"""session is used here for geocoding"""
 		parts = [
 			f"{self.name}'s TPG Wrapped for Season 2",
@@ -537,6 +537,9 @@ async def main() -> None:
 	)
 	submissions = submissions[submissions['round'] >= 216].copy()
 	logger.info('%d submissions for season 2', submissions.index.size)
+
+	# https://xkcd.com/2170/ (we do not need to know the difference between Waldos on pages), also this might actually matter when finding duplicate pics etc
+	submissions = submissions.round({'latitude': 5, 'longitude': 5})
 
 	submissions['target_cc'] = submissions.pop('country').fillna('XW')
 	submissions['place_percent'] = submissions['place'] / submissions['total_subs']
