@@ -506,6 +506,17 @@ def _find_first_matching_latlong_index(row: pandas.Series, submissions: geopanda
 	].first_valid_index()
 
 
+async def export_all(submissions: pandas.DataFrame, path: Path):
+	async with asyncio.TaskGroup() as group:
+		group.create_task(asyncio.to_thread(submissions.to_csv, path), name='to_csv')
+		group.create_task(
+			asyncio.to_thread(submissions.to_excel, path.with_suffix('.xlsx')), name='to_excel'
+		)
+		group.create_task(
+			asyncio.to_thread(submissions.to_pickle, path.with_suffix('.pickle')), name='to_pickle'
+		)
+
+
 async def main() -> None:
 	settings = Settings()
 	if not settings.submissions_with_scores_path:
@@ -557,8 +568,8 @@ async def main() -> None:
 		)
 		if settings.tpg_wrapped_output_path:
 			all_rows_path = settings.tpg_wrapped_output_path / 'all_rows.csv'
-			submissions.drop(columns='geometry').to_csv(all_rows_path)
-			submissions.drop(columns='geometry').to_excel(all_rows_path.with_suffix('.xlsx'))
+			await export_all(submissions.drop(columns='geometry'), all_rows_path)
+
 		assert isinstance(submissions, geopandas.GeoDataFrame), type(submissions)
 		tasks = []
 		for username in usernames:
