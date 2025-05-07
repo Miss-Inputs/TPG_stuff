@@ -29,6 +29,22 @@ def tpg_score(distances: 'pandas.Series'):
 		scores.loc[group.index] = group.mean()
 	return scores.round(2)
 
+def custom_tpg_score(distances: 'pandas.Series[float]', world_distance: float=20_000.0, fivek_score: float|None=7_500.0):
+	"""
+	Computes the score for a whole round of TPG, with a custom world distance constant, for spinoff TPGs that cover a smaller area. Does not factor in ties because I don't care. Rounds to 2 decimal places as normal.
+
+	Arguments:
+		distances: Distances in kilometres for each round.
+		world_distance: Maximum distance possible in this subset of the world in kilometres, defaults to 20K which is the default constant (not the exact max distance of the earth but close enough) anyway.
+		fivek_score: Flat score for 5Ks (100m radius), or None to disable this / consider 5Ks manually.
+	"""
+	distance_scores = world_distance - distances
+	players_beaten = distances.size - distances.rank(method='max', ascending=True)
+	players_beaten_scores = 5000 * (players_beaten / (distances.size - 1))
+	scores = distance_scores + players_beaten_scores
+	if fivek_score:
+		scores[distance_scores <= 0.1] = fivek_score
+	return scores.round(2)
 
 def print_round(n: int, row: Any, sesh: 'requests.Session | None' = None):
 	loc_address = reverse_geocode_address_sync(row.target_lat, row.target_lng, sesh)
