@@ -21,7 +21,7 @@ def tpg_score(distances: 'pandas.Series'):
 	scores = distance_scores + players_beaten_scores
 	bonus = distance_ranks.map({1: 3000, 2: 2000, 3: 1000})
 	# TODO: Should actually just pass in the fivek column
-	bonus.loc[distance_scores <= 0.1] = 5000
+	bonus.loc[distances <= 0.1] = 5000
 	scores += bonus.fillna(0)
 	scores.loc[distances >= 19_995] = 5000  # Antipode 5K
 	for _, group in scores.groupby(distance_ranks, sort=False):
@@ -29,7 +29,7 @@ def tpg_score(distances: 'pandas.Series'):
 		scores.loc[group.index] = group.mean()
 	return scores.round(2)
 
-def custom_tpg_score(distances: 'pandas.Series[float]', world_distance: float=20_000.0, fivek_score: float|None=7_500.0):
+def custom_tpg_score(distances: 'pandas.Series', world_distance: float=20_000.0, fivek_score: float|None=7_500.0):
 	"""
 	Computes the score for a whole round of TPG, with a custom world distance constant, for spinoff TPGs that cover a smaller area. Does not factor in ties because I don't care. Rounds to 2 decimal places as normal.
 
@@ -43,7 +43,7 @@ def custom_tpg_score(distances: 'pandas.Series[float]', world_distance: float=20
 	players_beaten_scores = 5000 * (players_beaten / (distances.size - 1))
 	scores = distance_scores + players_beaten_scores
 	if fivek_score:
-		scores[distance_scores <= 0.1] = fivek_score
+		scores[distances <= 0.1] = fivek_score
 	return scores.round(2)
 
 def print_round(n: int, row: Any, sesh: 'requests.Session | None' = None):
