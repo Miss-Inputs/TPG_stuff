@@ -22,7 +22,7 @@ def geod_distance_and_bearing(
 
 
 FloatListlike = Sequence[float] | numpy.ndarray | pandas.Series
-"""Accepted input types to pyproj.Geod.inv"""
+"""Accepted input types to pyproj.Geod.inv, although other stuff would probably work, just what works as a type hint"""
 
 
 @overload
