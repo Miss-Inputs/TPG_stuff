@@ -23,6 +23,7 @@ def calc_scores(target: Point, gdf: geopandas.GeoDataFrame, world_distance: floa
 	
 	scores = custom_tpg_score(gdf['distance'], world_distance)
 	gdf['score'] = scores
+	gdf['rank'] = gdf['score'].rank(ascending=False).astype(int)
 	return gdf.sort_values('score', ascending=False)
 	
 def main() -> None:
