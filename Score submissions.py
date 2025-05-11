@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Use export data -> CSV from hamburger menu on folder in submission tracker, assumes the first line is the target location
+"""
+Scores an exported submission tracker and sorts the entries, can use KML or also CSV (but the CSV export sucks)
+
+For CSV, use export data -> CSV from hamburger menu on folder in submission tracker, assumes the first line is the target location
 Expects columns: WKT, name, description
 """
 
@@ -12,6 +15,7 @@ import pandas
 from shapely import Point
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
+from lib.kml import parse_submission_kml
 from lib.tpg_utils import custom_tpg_score
 
 
@@ -49,9 +53,43 @@ def calc_scores(
 	return gdf.sort_values('score', ascending=False)
 
 
+def parse_csv(path: Path):
+	df = pandas.read_csv(path, on_bad_lines='warn')
+	gs = geopandas.GeoSeries.from_wkt(df.pop('WKT'), crs='wgs84')
+	gdf = geopandas.GeoDataFrame(df, geometry=gs)
+
+	target = gdf.geometry.iloc[0]
+	if not isinstance(target, Point):
+		raise TypeError(f'uh oh target is {type(target)}')
+	return target, gdf.tail(-1)
+
+
+def score_kml(path: Path, world_distance: float = 5000.0, *, use_haversine_for_score: bool = True):
+	submission_tracker = parse_submission_kml(path)
+	for r in submission_tracker.rounds:
+		data = {
+			submission.name: {
+				'desc': submission.description,
+				'style': submission.style,
+				'point': submission.point,
+			}
+			for submission in r.submissions
+		}
+		df = pandas.DataFrame.from_dict(data, orient='index')
+		gdf = geopandas.GeoDataFrame(df, geometry='point', crs='wgs84')
+		gdf.index.name = r.name
+
+		gdf = calc_scores(
+			r.target, gdf, world_distance, use_haversine_for_score=use_haversine_for_score
+		)
+		print(r.name)
+		print(gdf)
+		print('-' * 10)
+
+
 def main() -> None:
 	argparser = ArgumentParser()
-	argparser.add_argument('csv', type=Path, help='Path to CSV file')
+	argparser.add_argument('path', type=Path, help='Path to CSV/KML file')
 	argparser.add_argument(
 		'--world-distance',
 		type=float,
@@ -66,21 +104,23 @@ def main() -> None:
 	)
 	args = argparser.parse_args()
 
-	path: Path = args.csv
-	df = pandas.read_csv(path, on_bad_lines='warn')
-	gs = geopandas.GeoSeries.from_wkt(df.pop('WKT'), crs='wgs84')
-	gdf = geopandas.GeoDataFrame(df, geometry=gs)
+	path: Path = args.path
+	world_distance: float = args.world_distance
+	use_haversine: bool = args.use_haversine
+	ext = path.suffix[1:].lower()
 
-	target = gdf.geometry.iloc[0]
-	if not isinstance(target, Point):
-		raise TypeError(f'uh oh target is {type(target)}')
-	gdf = gdf.tail(-1)
-	gdf = gdf.set_index('name', verify_integrity=True)
-	gdf = calc_scores(target, gdf, args.world_distance, use_haversine_for_score=args.use_haversine)
+	if ext == 'csv':
+		target, gdf = parse_csv(path)
+		gdf = gdf.set_index('name', verify_integrity=True)
+		gdf = calc_scores(target, gdf, world_distance, use_haversine_for_score=use_haversine)
 
-	print(gdf)
-	out_path = path.with_stem(f'{path.stem} scores')
-	gdf.to_csv(out_path)
+		print(gdf)
+		out_path = path.with_stem(f'{path.stem} scores')
+		gdf.to_csv(out_path)
+	elif ext == 'kml':
+		score_kml(path)
+	else:
+		raise ValueError(f'Unknown extension: {ext}')
 
 
 if __name__ == '__main__':
