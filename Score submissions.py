@@ -7,6 +7,7 @@ Expects columns: WKT, name, description
 """
 
 from argparse import ArgumentParser, BooleanOptionalAction
+from collections import defaultdict
 from pathlib import Path
 
 import geopandas
@@ -15,6 +16,7 @@ import pandas
 from shapely import Point
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
+from lib.io_utils import geodataframe_to_csv
 from lib.kml import parse_submission_kml
 from lib.tpg_utils import custom_tpg_score
 
@@ -64,8 +66,23 @@ def parse_csv(path: Path):
 	return target, gdf.tail(-1)
 
 
+def _make_leaderboard(
+	data: dict[str, dict[str, float]], name: str, *, ascending: bool = False, dropna: bool = False
+):
+	df = pandas.DataFrame(data)
+	if dropna:
+		df = df.dropna()
+	df.insert(0, 'Total', df.sum(axis='columns'))
+	return df.sort_values('Total', ascending=ascending).rename_axis(index=name)
+
+
 def score_kml(path: Path, world_distance: float = 5000.0, *, use_haversine_for_score: bool = True):
 	submission_tracker = parse_submission_kml(path)
+	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
+	"""{round name: {submission name: score}}"""
+	distance_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
+	"""{round name: {submission name: distance in km}}"""
+
 	for r in submission_tracker.rounds:
 		data = {
 			submission.name: {
@@ -82,9 +99,24 @@ def score_kml(path: Path, world_distance: float = 5000.0, *, use_haversine_for_s
 		gdf = calc_scores(
 			r.target, gdf, world_distance, use_haversine_for_score=use_haversine_for_score
 		)
-		print(r.name)
 		print(gdf)
 		print('-' * 10)
+		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
+		geodataframe_to_csv(gdf, out_path)
+
+		for name, row in gdf.iterrows():
+			assert isinstance(name, str), f'name is {type(name)}'
+			points_leaderboard[r.name][name] = row['score']
+			distance_leaderboard[r.name][name] = row['distance']
+
+	points_leaderboard_df = _make_leaderboard(points_leaderboard, 'Points')
+	print(points_leaderboard_df)
+	points_leaderboard_df.to_csv(path.with_name(f'{path.stem} - Points Leaderboard.csv'))
+	distance_leaderboard_df = _make_leaderboard(
+		distance_leaderboard, 'Distance', ascending=True, dropna=True
+	)
+	print(distance_leaderboard_df)
+	distance_leaderboard_df.to_csv(path.with_name(f'{path.stem} - Distance Leaderboard.csv'))
 
 
 def main() -> None:
@@ -116,7 +148,7 @@ def main() -> None:
 
 		print(gdf)
 		out_path = path.with_stem(f'{path.stem} scores')
-		gdf.to_csv(out_path)
+		geodataframe_to_csv(gdf, out_path)
 	elif ext == 'kml':
 		score_kml(path)
 	else:

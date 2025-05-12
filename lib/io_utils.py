@@ -1,5 +1,6 @@
 import asyncio
 import warnings
+from collections.abc import Hashable
 from pathlib import Path
 from typing import Any
 
@@ -77,3 +78,18 @@ def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
 async def read_geodataframe_async(path: Path) -> geopandas.GeoDataFrame:
 	"""Reads a GeoDataFrame from a path in another thread, which can be compressed using Zstandard."""
 	return await asyncio.to_thread(read_geodataframe, path)
+
+
+def geodataframe_to_csv(
+	gdf: geopandas.GeoDataFrame,
+	path: Path,
+	lat_col_name: Hashable = 'lat',
+	lng_col_name: Hashable = 'lng',
+	*,
+	include_z: bool = False,
+):
+	"""Outputs a GeoDataFrame to CSV with lat and lng columns."""
+	df = gdf.drop(columns=gdf.active_geometry_name)
+	df = pandas.concat([df, gdf.get_coordinates(include_z=include_z)], axis='columns')
+	df = df.rename({'x': lng_col_name, 'y': lat_col_name})
+	df.to_csv(path)
