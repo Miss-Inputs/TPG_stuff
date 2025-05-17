@@ -149,7 +149,7 @@ def main() -> None:
 		print(gdf)
 		out_path = path.with_stem(f'{path.stem} scores')
 		geodataframe_to_csv(gdf, out_path)
-	elif ext == 'kml':
+	elif ext in {'kml', 'kmz'}:
 		score_kml(path)
 	else:
 		raise ValueError(f'Unknown extension: {ext}')

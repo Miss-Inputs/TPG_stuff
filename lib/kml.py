@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
+from zipfile import ZipFile
 
 from shapely import Point
 
@@ -81,8 +82,18 @@ def _parse_folder(folder: ElementTree.Element, *, include_antipode: bool = False
 	return SubmissionTrackerRound(name, target, antipode, submissions)
 
 
+def _parse_kmz(path: Path):
+	with ZipFile(path, 'r') as z, z.open('doc.kml') as f:
+		return ElementTree.parse(f)
+
+
 def parse_submission_kml(path: Path | ElementTree.ElementTree, *, include_antipode: bool = False):
-	tree = path if isinstance(path, ElementTree.ElementTree) else ElementTree.parse(path)
+	if isinstance(path, ElementTree.ElementTree):
+		tree = path
+	elif path.suffix[1:].lower() == 'kmz':
+		tree = _parse_kmz(path)
+	else:
+		tree = ElementTree.parse(path)
 	# I fucking hate namespaces!!!! Fuck you XML!!!
 	doc = tree.find('{http://www.opengis.net/kml/2.2}Document', {})
 	if doc is None:
