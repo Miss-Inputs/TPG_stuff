@@ -72,7 +72,9 @@ def _make_leaderboard(
 	df = pandas.DataFrame(data)
 	if dropna:
 		df = df.dropna()
+	num_rounds = df.columns.size
 	df.insert(0, 'Total', df.sum(axis='columns'))
+	df.insert(1, 'Average', df['Total'] / num_rounds)
 	return df.sort_values('Total', ascending=ascending).rename_axis(index=name)
 
 
