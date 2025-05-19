@@ -76,14 +76,24 @@ def _make_leaderboard(
 	return df.sort_values('Total', ascending=ascending).rename_axis(index=name)
 
 
-def score_kml(path: Path, world_distance: float = 5000.0, *, use_haversine_for_score: bool = True):
+def score_kml(
+	path: Path,
+	world_distance: float = 5000.0,
+	*,
+	use_haversine_for_score: bool = True,
+	ignore_ongoing: bool = False,
+):
 	submission_tracker = parse_submission_kml(path)
 	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
 	"""{round name: {submission name: score}}"""
 	distance_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
 	"""{round name: {submission name: distance in km}}"""
 
-	for r in submission_tracker.rounds:
+	rounds = submission_tracker.rounds
+	if ignore_ongoing:
+		rounds = rounds[:-1]
+
+	for r in rounds:
 		data = {
 			submission.name: {
 				'desc': submission.description,
@@ -134,6 +144,12 @@ def main() -> None:
 		help='Use haversine instead of WGS geod for scoring (less accurate as it assumes the earth is a sphere, but more consistent with other TPG things), defaults to True',
 		default=True,
 	)
+	argparser.add_argument(
+		'--ongoing-round',
+		action=BooleanOptionalAction,
+		help='Ignore the last round for the leaderboard and treat it as currently ongoing, defaults to False (ie run this after the round finishes)',
+		default=False,
+	)
 	args = argparser.parse_args()
 
 	path: Path = args.path
@@ -150,7 +166,7 @@ def main() -> None:
 		out_path = path.with_stem(f'{path.stem} scores')
 		geodataframe_to_csv(gdf, out_path)
 	elif ext in {'kml', 'kmz'}:
-		score_kml(path)
+		score_kml(path, ignore_ongoing=args.ongoing_round)
 	else:
 		raise ValueError(f'Unknown extension: {ext}')
 
