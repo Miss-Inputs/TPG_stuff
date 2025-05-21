@@ -25,8 +25,10 @@ def calc_scores(
 	target: Point,
 	gdf: geopandas.GeoDataFrame,
 	world_distance: float = 5000.0,
+	fivek_threshold: float = 0.1,
 	*,
 	use_haversine_for_score: bool = True,
+	allow_negative: bool = False,
 ) -> geopandas.GeoDataFrame:
 	n = gdf.index.size
 	target_y = numpy.repeat(target.y, n)
@@ -48,8 +50,12 @@ def calc_scores(
 		gdf['distance'] = geod_distance
 		gdf['haversine'] = haversine
 
-	# TODO: Custom 5K threshold, or more usefully perhaps something to allow a custom 5K point (for when 5Ks should not be the exact location due to being private property etc)
-	scores = custom_tpg_score(gdf['distance'], world_distance)
+	scores = custom_tpg_score(
+		gdf['distance'],
+		world_distance,
+		fivek_threshold=fivek_threshold,
+		allow_negative=allow_negative,
+	)
 	gdf['score'] = scores
 	gdf['rank'] = gdf['score'].rank(ascending=False).astype(int)
 	return gdf.sort_values('score', ascending=False)
@@ -81,9 +87,11 @@ def _make_leaderboard(
 def score_kml(
 	path: Path,
 	world_distance: float = 5000.0,
+	fivek_threshold: float = 0.1,
 	*,
 	use_haversine_for_score: bool = True,
 	ignore_ongoing: bool = False,
+	allow_negative: bool = False,
 ):
 	submission_tracker = parse_submission_kml(path)
 	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
@@ -109,7 +117,12 @@ def score_kml(
 		gdf.index.name = r.name
 
 		gdf = calc_scores(
-			r.target, gdf, world_distance, use_haversine_for_score=use_haversine_for_score
+			r.target,
+			gdf,
+			world_distance,
+			fivek_threshold,
+			use_haversine_for_score=use_haversine_for_score,
+			allow_negative=allow_negative,
 		)
 		print(gdf)
 		print('-' * 10)
@@ -141,6 +154,12 @@ def main() -> None:
 		default=5_000.0,
 	)
 	argparser.add_argument(
+		'--fivek-threshold',
+		type=float,
+		help='Threshold for a submission being close enough to be considered a 5K, used for calculating scoring, defaults to 100m',
+		default=0.1,
+	)
+	argparser.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
 		help='Use haversine instead of WGS geod for scoring (less accurate as it assumes the earth is a sphere, but more consistent with other TPG things), defaults to True',
@@ -152,23 +171,46 @@ def main() -> None:
 		help='Ignore the last round for the leaderboard and treat it as currently ongoing, defaults to False (ie run this after the round finishes)',
 		default=False,
 	)
+	argparser.add_argument(
+		'--allow-negative',
+		action=BooleanOptionalAction,
+		help='Allow negative scores for distance if greater than --world-distance km, defaults to False which gives a score of 0 for very far away submissions instead',
+		default=False,
+	)
 	args = argparser.parse_args()
 
 	path: Path = args.path
 	world_distance: float = args.world_distance
+	fivek_threshold: float = args.fivek_threshold
 	use_haversine: bool = args.use_haversine
+	allow_negative: bool = args.allow_negative
+
 	ext = path.suffix[1:].lower()
 
 	if ext == 'csv':
 		target, gdf = parse_csv(path)
 		gdf = gdf.set_index('name', verify_integrity=True)
-		gdf = calc_scores(target, gdf, world_distance, use_haversine_for_score=use_haversine)
+		gdf = calc_scores(
+			target,
+			gdf,
+			world_distance,
+			fivek_threshold,
+			use_haversine_for_score=use_haversine,
+			allow_negative=allow_negative,
+		)
 
 		print(gdf)
 		out_path = path.with_stem(f'{path.stem} scores')
 		geodataframe_to_csv(gdf, out_path)
 	elif ext in {'kml', 'kmz'}:
-		score_kml(path, ignore_ongoing=args.ongoing_round)
+		score_kml(
+			path,
+			world_distance,
+			fivek_threshold,
+			use_haversine_for_score=use_haversine,
+			ignore_ongoing=args.ongoing_round,
+			allow_negative=allow_negative,
+		)
 	else:
 		raise ValueError(f'Unknown extension: {ext}')
 
