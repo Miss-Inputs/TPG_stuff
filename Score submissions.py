@@ -8,6 +8,7 @@ Expects columns: WKT, name, description
 
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 
 import geopandas
@@ -17,8 +18,8 @@ from shapely import Point
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import geodataframe_to_csv
-from lib.kml import parse_submission_kml
-from lib.tpg_utils import custom_tpg_score
+from lib.kml import SubmissionTrackerRound, parse_submission_kml
+from lib.tpg_utils import Medal, count_medals, custom_tpg_score
 
 
 def calc_scores(
@@ -31,17 +32,14 @@ def calc_scores(
 	allow_negative: bool = False,
 ) -> geopandas.GeoDataFrame:
 	n = gdf.index.size
+	x = gdf.geometry.x
+	y = gdf.geometry.y
 	target_y = numpy.repeat(target.y, n)
 	target_x = numpy.repeat(target.x, n)
-	distance_raw, bearing = geod_distance_and_bearing(
-		gdf.geometry.y, gdf.geometry.x, target_y, target_x
-	)
+	distance_raw, bearing = geod_distance_and_bearing(y, x, target_y, target_x)
 	gdf['bearing'] = bearing
 	geod_distance = pandas.Series(distance_raw, index=gdf.index) / 1000.0
-	haversine = (
-		haversine_distance(gdf.geometry.y.to_numpy(), gdf.geometry.x.to_numpy(), target_y, target_x)
-		/ 1000.0
-	)
+	haversine = haversine_distance(y.to_numpy(), x.to_numpy(), target_y, target_x) / 1000.0
 
 	if use_haversine_for_score:
 		gdf['distance'] = haversine
@@ -84,25 +82,14 @@ def _make_leaderboard(
 	return df.sort_values('Total', ascending=ascending).rename_axis(index=name)
 
 
-def score_kml(
-	path: Path,
+def _iter_scored_rounds(
+	rounds: Sequence[SubmissionTrackerRound],
 	world_distance: float = 5000.0,
 	fivek_threshold: float = 0.1,
 	*,
 	use_haversine_for_score: bool = True,
-	ignore_ongoing: bool = False,
 	allow_negative: bool = False,
 ):
-	submission_tracker = parse_submission_kml(path)
-	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
-	"""{round name: {submission name: score}}"""
-	distance_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
-	"""{round name: {submission name: distance in km}}"""
-
-	rounds = submission_tracker.rounds
-	if ignore_ongoing:
-		rounds = rounds[:-1]
-
 	for r in rounds:
 		data = {
 			submission.name: {
@@ -116,14 +103,47 @@ def score_kml(
 		gdf = geopandas.GeoDataFrame(df, geometry='point', crs='wgs84')
 		gdf.index.name = r.name
 
-		gdf = calc_scores(
-			r.target,
-			gdf,
-			world_distance,
-			fivek_threshold,
-			use_haversine_for_score=use_haversine_for_score,
-			allow_negative=allow_negative,
+		yield (
+			r,
+			calc_scores(
+				r.target,
+				gdf,
+				world_distance,
+				fivek_threshold,
+				use_haversine_for_score=use_haversine_for_score,
+				allow_negative=allow_negative,
+			),
 		)
+
+
+def score_kml(
+	path: Path,
+	world_distance: float = 5000.0,
+	fivek_threshold: float = 0.1,
+	*,
+	use_haversine_for_score: bool = True,
+	ignore_ongoing: bool = False,
+	allow_negative: bool = False,
+):
+	submission_tracker = parse_submission_kml(path)
+	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
+	"""{round name: {player name: score}}"""
+	distance_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
+	"""{round name: {player name: distance in km}}"""
+	medals: defaultdict[str, list[Medal]] = defaultdict(list)
+	"""{player name: [medals from all rounds that were on the podium]}"""
+
+	rounds = submission_tracker.rounds
+	if ignore_ongoing:
+		rounds = rounds[:-1]
+
+	for r, gdf in _iter_scored_rounds(
+		rounds,
+		world_distance,
+		fivek_threshold,
+		use_haversine_for_score=use_haversine_for_score,
+		allow_negative=allow_negative,
+	):
 		print(gdf)
 		print('-' * 10)
 		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
@@ -133,6 +153,8 @@ def score_kml(
 			assert isinstance(name, str), f'name is {type(name)}'
 			points_leaderboard[r.name][name] = row['score']
 			distance_leaderboard[r.name][name] = row['distance']
+			if row['rank'] <= 3:
+				medals[name].append(Medal(4 - row['rank']))
 
 	points_leaderboard_df = _make_leaderboard(points_leaderboard, 'Points')
 	print(points_leaderboard_df)
@@ -142,6 +164,9 @@ def score_kml(
 	)
 	print(distance_leaderboard_df)
 	distance_leaderboard_df.to_csv(path.with_name(f'{path.stem} - Distance Leaderboard.csv'))
+	medals_leaderboard = count_medals(medals)
+	print(medals_leaderboard)
+	medals_leaderboard.to_csv(path.with_name(f'{path.stem} - Medals Leaderboard.csv'))
 
 
 def main() -> None:
