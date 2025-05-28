@@ -1,6 +1,7 @@
 aiohttp
 async-lru
 backoff
+contextily
 geopandas
 pycountry
 pydantic-settings
