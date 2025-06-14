@@ -1,15 +1,17 @@
 """Dunno what else to call this"""
 
+import contextlib
 import logging
 from functools import cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas
 import pycountry
 
-from lib.reverse_geocode import reverse_geocode_address
+from lib.reverse_geocode import reverse_geocode_address, reverse_geocode_address_sync
 
 if TYPE_CHECKING:
+	import requests
 	from aiohttp import ClientSession
 	from shapely import Point
 
@@ -101,3 +103,34 @@ def format_ordinal(n: float) -> str:
 		return f'{n:.2f}th'
 	n = int(n)
 	return f'{n}{get_ordinal(n)}'
+
+
+def print_round_sync(n: int, row: Any, sesh: 'requests.Session | None' = None):
+	loc_address = reverse_geocode_address_sync(row.target_lat, row.target_lng, sesh)
+	print(f'{n}: Round {row.round}: {row.target_lat, row.target_lng} {loc_address}')
+	sub_address = reverse_geocode_address_sync(row.latitude, row.longitude, sesh)
+	print(f'Submission: {row.latitude}, {row.longitude} {sub_address}')
+	print(
+		f'Distance: {row.distance / 1000:4g}km Place: {row.place}/{row.total_subs} Score: {row.score}'
+	)
+	with contextlib.suppress(AttributeError):
+		print(
+			f'Geodesic distance: {row.geod_distance / 1000:.4g}km Heading from photo to loc: {row.heading}°'
+		)
+
+	print('-' * 10)
+
+async def print_round(n: int, row: Any, sesh: 'ClientSession'):
+	loc_address = await reverse_geocode_address(row.target_lat, row.target_lng, sesh)
+	print(f'{n}: Round {row.round}: {row.target_lat, row.target_lng} {loc_address}')
+	sub_address = await reverse_geocode_address(row.latitude, row.longitude, sesh)
+	print(f'Submission: {row.latitude}, {row.longitude} {sub_address}')
+	print(
+		f'Distance: {row.distance / 1000:4g}km Place: {row.place}/{row.total_subs} Score: {row.score}'
+	)
+	with contextlib.suppress(AttributeError):
+		print(
+			f'Geodesic distance: {row.geod_distance / 1000:.4g}km Heading from photo to loc: {row.heading}°'
+		)
+
+	print('-' * 10)
