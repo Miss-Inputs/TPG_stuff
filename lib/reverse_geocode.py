@@ -259,10 +259,10 @@ def reverse_geocode_gadm_all(
 	"""Reverse geocodes using one layer of GADM for all points."""
 	if isinstance(gadm, Path):
 		gadm = read_geodataframe(gadm)
-	gadm_index, point_index = points.sindex.query(gadm.geometry, 'contains')
+	gadm_index, point_index = points.sindex.query(gadm.geometry, 'contains', output_format='tuple')
 	d: dict[int, str] = {
 		cast('int', points.index[p]): gadm.iloc[g][col_name]
-		for p, g in zip(point_index, gadm_index, strict=True)
+		for p, g in zip(point_index, gadm_index, strict=True)  # type: ignore[argType] #type hints think sindex.query returns two int64s, for now
 	}
 	return pandas.Series(d, index=points.index)
 
