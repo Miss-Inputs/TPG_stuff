@@ -165,7 +165,7 @@ def score_kml(
 		print('-' * 10)
 		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
 		geodataframe_to_csv(gdf, out_path)
-		stats[r.name] = get_round_stats(r)
+		stats[r.name] = get_round_stats(r, world_distance)
 
 		for name, row in gdf.iterrows():
 			assert isinstance(name, str), f'name is {type(name)}'
@@ -194,9 +194,12 @@ async def output_season(season: Season, path: Path, *, detailed_stats: bool = Fa
 	stats_data = [
 		{
 			'Round': round_name,
-			'Average distance': stat.average_distance / 100,
+			'Average distance': stat.average_distance / 1000,
+			'Raw average distance': stat.average_distance_raw / 1000,
 			'Submission centroid lat': stat.centroid.y,
 			'Submission centroid lng': stat.centroid.x,
+			'Raw centroid lng': stat.centroid_raw.y,
+			'Raw centroid lat': stat.centroid_raw.x,
 		}
 		for round_name, stat in season.stats.items()
 	]
