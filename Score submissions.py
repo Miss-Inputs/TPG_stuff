@@ -91,10 +91,12 @@ def _iter_scored_rounds(
 	allow_negative: bool = False,
 ):
 	for r in rounds:
+		#TODO: Check that there are no duplicates
 		data = {
 			submission.name: {
 				'desc': submission.description,
 				'style': submission.style,
+				# TODO: I guess we should probably parse style
 				'point': submission.point,
 			}
 			for submission in r.submissions
@@ -144,7 +146,7 @@ def score_kml(
 		use_haversine_for_score=use_haversine_for_score,
 		allow_negative=allow_negative,
 	):
-		print(gdf)
+		print(gdf.drop(columns='style'))
 		print('-' * 10)
 		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
 		geodataframe_to_csv(gdf, out_path)
