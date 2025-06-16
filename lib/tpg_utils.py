@@ -1,8 +1,17 @@
 from collections import Counter
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from enum import IntEnum
+from typing import TYPE_CHECKING
 
+import numpy
 import pandas
+import shapely
+
+from lib.geo_utils import geod_distance_and_bearing
+
+if TYPE_CHECKING:
+	from lib.kml import SubmissionTrackerRound
 
 
 def tpg_score(distances: 'pandas.Series', *, allow_negative: bool = False):
@@ -95,3 +104,26 @@ def count_medals(medals: Mapping[str, Collection[Medal]]):
 	df = df.fillna(0)
 	df['Medal Score'] = points
 	return df.sort_values('Medal Score', ascending=False)
+
+
+@dataclass
+class RoundStats:
+	average_distance: float
+	"""Average distance of all submissions in km"""
+	centroid: shapely.Point
+	"""Centroid of all submissions"""
+
+
+def get_round_stats(r: 'SubmissionTrackerRound'):
+	n = len(r.submissions)
+	x = [r.target.x] * n
+	y = [r.target.y] * n
+	sub_x = [sub.point.x for sub in r.submissions]
+	sub_y = [sub.point.y for sub in r.submissions]
+
+	distances, _ = geod_distance_and_bearing(sub_y, sub_x, y, x)
+	avg = numpy.mean(distances)
+
+	all_points = shapely.MultiPoint([sub.point for sub in r.submissions])
+	centroid = all_points.centroid
+	return RoundStats(float(avg), centroid)

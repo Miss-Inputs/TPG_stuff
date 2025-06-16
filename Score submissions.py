@@ -6,20 +6,24 @@ For CSV, use export data -> CSV from hamburger menu on folder in submission trac
 Expects columns: WKT, name, description
 """
 
+import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas
 import numpy
 import pandas
+from aiohttp import ClientSession
 from shapely import Point
 
+from lib.format_utils import describe_point
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import geodataframe_to_csv
 from lib.kml import SubmissionTrackerRound, parse_submission_kml
-from lib.tpg_utils import Medal, count_medals, custom_tpg_score
+from lib.tpg_utils import Medal, RoundStats, count_medals, custom_tpg_score, get_round_stats
 
 
 def calc_scores(
@@ -91,7 +95,7 @@ def _iter_scored_rounds(
 	allow_negative: bool = False,
 ):
 	for r in rounds:
-		#TODO: Check that there are no duplicates
+		# TODO: Check that there are no duplicates
 		data = {
 			submission.name: {
 				'desc': submission.description,
@@ -118,6 +122,18 @@ def _iter_scored_rounds(
 		)
 
 
+@dataclass
+class Season:
+	points_leaderboard: dict[str, dict[str, float]]
+	"""{round name: {player name: score}}"""
+	distance_leaderboard: dict[str, dict[str, float]]
+	"""{round name: {player name: distance in km}}"""
+	medals: dict[str, list[Medal]]
+	"""{player name: [medals from all rounds that were on the podium]}"""
+	stats: dict[str, RoundStats]
+	"""{round name: stats}"""
+
+
 def score_kml(
 	path: Path,
 	world_distance: float = 5000.0,
@@ -129,11 +145,9 @@ def score_kml(
 ):
 	submission_tracker = parse_submission_kml(path)
 	points_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
-	"""{round name: {player name: score}}"""
 	distance_leaderboard: defaultdict[str, dict[str, float]] = defaultdict(dict)
-	"""{round name: {player name: distance in km}}"""
 	medals: defaultdict[str, list[Medal]] = defaultdict(list)
-	"""{player name: [medals from all rounds that were on the podium]}"""
+	stats: dict[str, RoundStats] = {}
 
 	rounds = submission_tracker.rounds
 	if ignore_ongoing:
@@ -146,10 +160,12 @@ def score_kml(
 		use_haversine_for_score=use_haversine_for_score,
 		allow_negative=allow_negative,
 	):
+		# TODO: Put this outputtery somewhere else
 		print(gdf.drop(columns='style'))
 		print('-' * 10)
 		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
 		geodataframe_to_csv(gdf, out_path)
+		stats[r.name] = get_round_stats(r)
 
 		for name, row in gdf.iterrows():
 			assert isinstance(name, str), f'name is {type(name)}'
@@ -157,21 +173,47 @@ def score_kml(
 			distance_leaderboard[r.name][name] = row['distance']
 			if row['rank'] <= 3:
 				medals[name].append(Medal(4 - row['rank']))
+	return Season(points_leaderboard, distance_leaderboard, medals, stats)
 
-	points_leaderboard_df = _make_leaderboard(points_leaderboard, 'Points')
-	print(points_leaderboard_df)
-	points_leaderboard_df.to_csv(path.with_name(f'{path.stem} - Points Leaderboard.csv'))
-	distance_leaderboard_df = _make_leaderboard(
-		distance_leaderboard, 'Distance', ascending=True, dropna=True
+
+async def output_season(season: Season, path: Path, *, detailed_stats: bool = False):
+	points_leaderboard = _make_leaderboard(season.points_leaderboard, 'Points')
+	print(points_leaderboard)
+	points_leaderboard.to_csv(path.with_name(f'{path.stem} - Points Leaderboard.csv'))
+
+	distance_leaderboard = _make_leaderboard(
+		season.distance_leaderboard, 'Distance', ascending=True, dropna=True
 	)
-	print(distance_leaderboard_df)
-	distance_leaderboard_df.to_csv(path.with_name(f'{path.stem} - Distance Leaderboard.csv'))
-	medals_leaderboard = count_medals(medals)
+	print(distance_leaderboard)
+	distance_leaderboard.to_csv(path.with_name(f'{path.stem} - Distance Leaderboard.csv'))
+	medals_leaderboard = count_medals(season.medals)
 	print(medals_leaderboard)
 	medals_leaderboard.to_csv(path.with_name(f'{path.stem} - Medals Leaderboard.csv'))
 
+	# hrm maybe I shouldn't have used dataclasses here if I'm just going to convert it anyway. Oh well it'll be fine
+	stats_data = [
+		{
+			'Round': round_name,
+			'Average distance': stat.average_distance / 100,
+			'Submission centroid lat': stat.centroid.y,
+			'Submission centroid lng': stat.centroid.x,
+		}
+		for round_name, stat in season.stats.items()
+	]
+	stats = pandas.DataFrame(stats_data)
+	stats = stats.set_index('Round')
+	if detailed_stats:
+		async with ClientSession() as sesh:
+			addresses = {
+				round_name: await describe_point(stat.centroid, sesh)
+				for round_name, stat in season.stats.items()
+			}
+		stats['Submission centroid'] = addresses
+	print(stats)
+	stats.to_csv(path.with_name(f'{path.stem} - Stats.csv'))
 
-def main() -> None:
+
+async def main() -> None:
 	argparser = ArgumentParser()
 	argparser.add_argument('path', type=Path, help='Path to CSV/KML file')
 	argparser.add_argument(
@@ -204,6 +246,12 @@ def main() -> None:
 		help='Allow negative scores for distance if greater than --world-distance km, defaults to False which gives a score of 0 for very far away submissions instead',
 		default=False,
 	)
+	argparser.add_argument(
+		'--detailed-stats',
+		action=BooleanOptionalAction,
+		help='Reverse geocode points in stats, etc',
+		default=False,
+	)
 	args = argparser.parse_args()
 
 	path: Path = args.path
@@ -230,7 +278,7 @@ def main() -> None:
 		out_path = path.with_stem(f'{path.stem} scores')
 		geodataframe_to_csv(gdf, out_path)
 	elif ext in {'kml', 'kmz'}:
-		score_kml(
+		season = score_kml(
 			path,
 			world_distance,
 			fivek_threshold,
@@ -238,9 +286,10 @@ def main() -> None:
 			ignore_ongoing=args.ongoing_round,
 			allow_negative=allow_negative,
 		)
+		await output_season(season, path, detailed_stats=args.detailed_stats)
 	else:
 		raise ValueError(f'Unknown extension: {ext}')
 
 
 if __name__ == '__main__':
-	main()
+	asyncio.run(main())
