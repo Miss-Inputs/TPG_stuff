@@ -23,6 +23,7 @@ from lib.format_utils import describe_point
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import geodataframe_to_csv
 from lib.kml import SubmissionTrackerRound, parse_submission_kml
+from lib.other_utils import find_duplicates
 from lib.tpg_utils import Medal, RoundStats, count_medals, custom_tpg_score, get_round_stats
 
 
@@ -95,7 +96,12 @@ def _iter_scored_rounds(
 	allow_negative: bool = False,
 ):
 	for r in rounds:
-		# TODO: Check that there are no duplicates
+		if not r.submissions:
+			continue
+		dupes = find_duplicates(s.name for s in r.submissions)
+		if dupes:
+			raise RuntimeError(f'Duplicate names found in round {r.name}: {dupes}')
+		
 		data = {
 			submission.name: {
 				'desc': submission.description,
