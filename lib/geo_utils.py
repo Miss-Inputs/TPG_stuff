@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Hashable, Iterable, Sequence
 from functools import partial
-from itertools import combinations
+from itertools import chain, combinations
 from typing import Any, overload
 
 import geopandas
@@ -283,3 +283,12 @@ def get_points_uniqueness_in_row(points: geopandas.GeoDataFrame, unique_row: Has
 		others = points[points[unique_row] != points.at[index, unique_row]]
 		distances[index], closest_indexes[index] = get_point_uniqueness(point, others.geometry)
 	return pandas.Series(distances), pandas.Series(closest_indexes)
+
+
+def get_poly_vertices(poly: shapely.Polygon | shapely.MultiPolygon) -> Sequence[shapely.Point]:
+	if isinstance(poly, shapely.MultiPolygon):
+		return list(chain.from_iterable(get_poly_vertices(part) for part in poly.geoms))
+	out = shapely.points(poly.exterior.coords)
+	if isinstance(out, shapely.Point):
+		return [out]
+	return out.tolist()

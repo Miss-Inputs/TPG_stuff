@@ -1,11 +1,13 @@
 from dataclasses import dataclass
+from itertools import combinations, starmap
 from typing import TYPE_CHECKING
 
 import numpy
+import pandas
 import shapely
-from shapely import Point
+from shapely import MultiPolygon, Point, Polygon
 
-from lib.geo_utils import geod_distance_and_bearing
+from lib.geo_utils import geod_distance_and_bearing, get_poly_vertices
 
 if TYPE_CHECKING:
 	from lib.kml import SubmissionTrackerRound
@@ -50,3 +52,18 @@ def get_round_stats(r: 'SubmissionTrackerRound', world_distance: float | None = 
 	all_points_raw = shapely.MultiPoint([sub.point for sub in r.submissions])
 	centroid_raw = all_points_raw.centroid
 	return RoundStats(float(avg), float(avg_raw), centroid, centroid_raw)
+
+
+def get_longest_distance(poly: Polygon | MultiPolygon):
+	vertices = get_poly_vertices(poly)
+	return max(starmap(shapely.distance, combinations(vertices, 2)))
+
+
+def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
+	vertices = [v for v in get_poly_vertices(poly) if not v.equals_exact(point, 1e-7)]
+	distances = [[v, point.distance(v)] for v in vertices]
+	df = pandas.DataFrame(distances, columns=['point', 'distance'])
+	idxmax = df['distance'].idxmax()
+	antipoint = df.loc[idxmax, 'point']
+	assert isinstance(antipoint, Point), type(antipoint)
+	return antipoint, float(df.loc[idxmax, 'distance'])  # type: ignore[arg-type]
