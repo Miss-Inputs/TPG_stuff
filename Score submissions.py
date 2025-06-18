@@ -24,7 +24,8 @@ from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import geodataframe_to_csv
 from lib.kml import SubmissionTrackerRound, parse_submission_kml
 from lib.other_utils import find_duplicates
-from lib.tpg_utils import Medal, RoundStats, count_medals, custom_tpg_score, get_round_stats
+from lib.stats import RoundStats, get_round_stats
+from lib.tpg_utils import Medal, count_medals, custom_tpg_score
 
 
 def calc_scores(
