@@ -1,7 +1,9 @@
 """Parser for KML files exported from Google My Maps"""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 from xml.etree import ElementTree
 from zipfile import ZipFile
@@ -87,20 +89,34 @@ def _parse_kmz(path: Path):
 		return ElementTree.parse(f)
 
 
-def parse_submission_kml(path: Path | ElementTree.ElementTree, *, include_antipode: bool = False):
+def _parse_kml_rounds(path: Path | ElementTree.ElementTree, *, include_antipode: bool = False):
 	if isinstance(path, ElementTree.ElementTree):
 		tree = path
 	elif path.suffix[1:].lower() == 'kmz':
 		tree = _parse_kmz(path)
 	else:
 		tree = ElementTree.parse(path)
-	# I fucking hate namespaces!!!! Fuck you XML!!!
+
 	doc = tree.find('{http://www.opengis.net/kml/2.2}Document', {})
 	if doc is None:
 		raise KMLError(f'{path} has no document')
 
-	rounds = [
+	return [
 		_parse_folder(folder, include_antipode=include_antipode)
 		for folder in doc.iter('{http://www.opengis.net/kml/2.2}Folder')
 	]
+
+
+def parse_submission_kml(
+	path: Path | ElementTree.ElementTree | Sequence[Path], *, include_antipode: bool = False
+):
+	if isinstance(path, Sequence):
+		rounds = list(
+			chain.from_iterable(
+				_parse_kml_rounds(p, include_antipode=include_antipode) for p in path
+			)
+		)
+	else:
+		rounds = _parse_kml_rounds(path, include_antipode=include_antipode)
+
 	return SubmissionTracker(rounds)

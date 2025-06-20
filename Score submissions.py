@@ -102,7 +102,7 @@ def _iter_scored_rounds(
 		dupes = find_duplicates(s.name for s in r.submissions)
 		if dupes:
 			raise RuntimeError(f'Duplicate names found in round {r.name}: {dupes}')
-		
+
 		data = {
 			submission.name: {
 				'desc': submission.description,
@@ -142,7 +142,7 @@ class Season:
 
 
 def score_kml(
-	path: Path,
+	path: Path | Sequence[Path],
 	world_distance: float = 5000.0,
 	fivek_threshold: float = 0.1,
 	*,
@@ -170,7 +170,11 @@ def score_kml(
 		# TODO: Put this outputtery somewhere else
 		print(gdf.drop(columns='style'))
 		print('-' * 10)
-		out_path = path.with_name(f'{path.stem} - {r.name}.csv')
+		out_path = (
+			path.with_name(f'{path.stem} - {r.name}.csv')
+			if isinstance(path, Path)
+			else path[0].with_name(f'{path[0].stem} - {r.name}.csv')
+		)
 		geodataframe_to_csv(gdf, out_path)
 		stats[r.name] = get_round_stats(r, world_distance)
 
@@ -225,7 +229,7 @@ async def output_season(season: Season, path: Path, *, detailed_stats: bool = Fa
 
 async def main() -> None:
 	argparser = ArgumentParser()
-	argparser.add_argument('path', type=Path, help='Path to CSV/KML file')
+	argparser.add_argument('path', type=Path, help='Path to CSV/KML file', nargs='+')
 	argparser.add_argument(
 		'--world-distance',
 		type=float,
@@ -264,15 +268,18 @@ async def main() -> None:
 	)
 	args = argparser.parse_args()
 
-	path: Path = args.path
+	paths: list[Path] = args.path
 	world_distance: float = args.world_distance
 	fivek_threshold: float = args.fivek_threshold
 	use_haversine: bool = args.use_haversine
 	allow_negative: bool = args.allow_negative
 
+	path = paths[0]
 	ext = path.suffix[1:].lower()
 
 	if ext == 'csv':
+		if len(paths) > 1:
+			raise ValueError('Only one csv file supported')
 		target, gdf = parse_csv(path)
 		gdf = gdf.set_index('name', verify_integrity=True)
 		gdf = calc_scores(
@@ -289,7 +296,7 @@ async def main() -> None:
 		geodataframe_to_csv(gdf, out_path)
 	elif ext in {'kml', 'kmz'}:
 		season = score_kml(
-			path,
+			paths,
 			world_distance,
 			fivek_threshold,
 			use_haversine_for_score=use_haversine,
