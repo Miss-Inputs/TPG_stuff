@@ -95,4 +95,3 @@ def count_medals(medals: Mapping[str, Collection[Medal]]):
 	df = df.fillna(0)
 	df['Medal Score'] = points
 	return df.sort_values('Medal Score', ascending=False)
-

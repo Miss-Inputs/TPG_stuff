@@ -7,6 +7,7 @@ from pathlib import Path
 
 import shapely.ops
 from aiohttp import ClientSession
+from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Polygon
 
@@ -48,6 +49,7 @@ async def main() -> None:
 			point = shapely.ops.transform(to_wgs84.transform, point)
 			if args.print_columns:
 				rows = gdf[gdf.contains(point)].head(1).squeeze()
+				assert isinstance(rows, Series), type(rows)
 				desc = ', '.join(rows[args.print_columns].to_list())
 			else:
 				desc = await describe_point(point, sesh)

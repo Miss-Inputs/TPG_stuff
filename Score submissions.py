@@ -9,7 +9,7 @@ Expects columns: WKT, name, description
 import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,7 +21,7 @@ from shapely import Point
 
 from lib.format_utils import describe_point
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
-from lib.io_utils import geodataframe_to_csv
+from lib.io_utils import geodataframe_to_csv, read_lines_async
 from lib.kml import SubmissionTrackerRound, parse_submission_kml
 from lib.other_utils import find_duplicates
 from lib.stats import RoundStats, get_round_stats
@@ -88,6 +88,13 @@ def _make_leaderboard(
 	return df.sort_values('Total', ascending=ascending).rename_axis(index=name)
 
 
+def print_submission_reminders(names: Collection[str], reminder_names: Collection[str]):
+	# probably a better way to do this, oh well
+	for name in reminder_names:
+		if name not in names:
+			print(f'Submission reminder for {name}')
+
+
 def _iter_scored_rounds(
 	rounds: Sequence[SubmissionTrackerRound],
 	world_distance: float = 5000.0,
@@ -139,10 +146,13 @@ class Season:
 	"""{player name: [medals from all rounds that were on the podium]}"""
 	stats: dict[str, RoundStats]
 	"""{round name: stats}"""
+	current_round_names: list[str]
+	"""Names of players who have submitted in the current round"""
 
 
 def score_kml(
 	path: Path | Sequence[Path],
+	reminder_list: Collection[str],
 	world_distance: float = 5000.0,
 	fivek_threshold: float = 0.1,
 	*,
@@ -157,6 +167,7 @@ def score_kml(
 	stats: dict[str, RoundStats] = {}
 
 	rounds = submission_tracker.rounds
+	current_names = [s.name for s in rounds[-1].submissions]
 	if ignore_ongoing:
 		rounds = rounds[:-1]
 
@@ -184,7 +195,7 @@ def score_kml(
 			distance_leaderboard[r.name][name] = row['distance']
 			if row['rank'] <= 3:
 				medals[name].append(Medal(4 - row['rank']))
-	return Season(points_leaderboard, distance_leaderboard, medals, stats)
+	return Season(points_leaderboard, distance_leaderboard, medals, stats, current_names)
 
 
 async def output_season(season: Season, path: Path, *, detailed_stats: bool = False):
@@ -266,6 +277,11 @@ async def main() -> None:
 		help='Reverse geocode points in stats, etc',
 		default=False,
 	)
+	argparser.add_argument(
+		'--reminder-list',
+		type=Path,
+		help='Path to file containing names of people who want to be reminded if they have not submitted',
+	)
 	args = argparser.parse_args()
 
 	paths: list[Path] = args.path
@@ -273,6 +289,7 @@ async def main() -> None:
 	fivek_threshold: float = args.fivek_threshold
 	use_haversine: bool = args.use_haversine
 	allow_negative: bool = args.allow_negative
+	reminder_list_path: Path | None = args.reminder_list
 
 	path = paths[0]
 	ext = path.suffix[1:].lower()
@@ -295,8 +312,10 @@ async def main() -> None:
 		out_path = path.with_stem(f'{path.stem} scores')
 		geodataframe_to_csv(gdf, out_path)
 	elif ext in {'kml', 'kmz'}:
+		reminder_list = await read_lines_async(reminder_list_path) if reminder_list_path else ()
 		season = score_kml(
 			paths,
+			reminder_list,
 			world_distance,
 			fivek_threshold,
 			use_haversine_for_score=use_haversine,
@@ -304,6 +323,7 @@ async def main() -> None:
 			allow_negative=allow_negative,
 		)
 		await output_season(season, path, detailed_stats=args.detailed_stats)
+		print_submission_reminders(season.current_round_names, reminder_list)
 	else:
 		raise ValueError(f'Unknown extension: {ext}')
 

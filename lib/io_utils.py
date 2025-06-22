@@ -292,3 +292,8 @@ async def load_points_async(
 		has_header=has_header,
 		keep_lnglat_cols=keep_lnglat_cols,
 	)
+
+
+async def read_lines_async(path: Path, encoding: str = 'utf-8'):
+	text = await asyncio.to_thread(path.read_text, encoding)
+	return [line for line in text.splitlines() if line]
