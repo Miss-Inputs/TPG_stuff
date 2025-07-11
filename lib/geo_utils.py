@@ -292,3 +292,12 @@ def get_poly_vertices(poly: shapely.Polygon | shapely.MultiPolygon) -> Sequence[
 	if isinstance(out, shapely.Point):
 		return [out]
 	return out.tolist()
+
+
+def get_midpoint(point_a: shapely.Point, point_b: shapely.Point):
+	# TODO: Vectorized version
+	forward_azimuth, _, dist = geod.inv(
+		point_a.x, point_a.y, point_b.x, point_b.y, return_back_azimuth=False
+	)
+	lng, lat, _ = geod.fwd(point_a.x, point_a.y, forward_azimuth, dist / 2)
+	return shapely.Point(lng, lat)
