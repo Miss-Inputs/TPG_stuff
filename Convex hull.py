@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Simple script to get a convex hull, for visualizing the general area that your pics have"""
+
+import asyncio
+from argparse import ArgumentParser
+from pathlib import Path
+
+import shapely
+from geopandas import GeoSeries
+
+from lib.io_utils import load_points_async
+
+
+async def main() -> None:
+	argparser = ArgumentParser()
+	argparser.add_argument(
+		'path',
+		type=Path,
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
+	)
+	argparser.add_argument('output_path', type=Path, help='Path to write a file with the results')
+
+	argparser.add_argument(
+		'--lat-column',
+		'--latitude-column',
+		dest='lat_col',
+		help='Force a specific column label for latitude, defaults to autodetected',
+	)
+	argparser.add_argument(
+		'--lng-column',
+		'--longitude-column',
+		dest='lng_col',
+		help='Force a specific column label for latitude, defaults to autodetected',
+	)
+	argparser.add_argument(
+		'--unheadered',
+		action='store_true',
+		help='Explicitly treat csv/Excel as not having a header, otherwise autodetect (and default to yes header if unknown)',
+	)
+	argparser.add_argument(
+		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
+	)
+	argparser.add_argument('--concave', action='store_true', help='Create a concave hull instead')
+
+	args = argparser.parse_args()
+	gdf = await load_points_async(
+		args.path,
+		args.lat_col,
+		args.lng_col,
+		crs=args.crs,
+		has_header=False if args.unheadered else None,
+	)
+	union = gdf.union_all()
+	hull = shapely.concave_hull(union) if args.concave else shapely.convex_hull(union)
+	s = GeoSeries([hull], crs=gdf.crs)
+	s.to_file(args.output_path)
+
+
+if __name__ == '__main__':
+	asyncio.run(main())
