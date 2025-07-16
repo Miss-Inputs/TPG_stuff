@@ -5,7 +5,9 @@ import asyncio
 from argparse import ArgumentParser
 from pathlib import Path
 
+import pyproj
 import shapely
+import shapely.ops
 from geopandas import GeoSeries
 
 from lib.io_utils import load_points_async
@@ -53,7 +55,14 @@ async def main() -> None:
 	union = gdf.union_all()
 	hull = shapely.concave_hull(union) if args.concave else shapely.convex_hull(union)
 	s = GeoSeries([hull], crs=gdf.crs)
-	s.to_file(args.output_path)
+	await asyncio.to_thread(s.to_file, args.output_path)
+
+	if s.crs and not s.crs.equals('wgs84'):
+		s = s.to_crs('wgs84')
+		hull = s.geometry[0]
+	geod = pyproj.Geod(ellps='WGS84')
+	area, _perimeter = geod.geometry_area_perimeter(hull)
+	print(f'Area: {abs(area) / 1_000_000}')
 
 
 if __name__ == '__main__':
