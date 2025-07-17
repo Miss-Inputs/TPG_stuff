@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pyproj
 import shapely
-import shapely.ops
 from geopandas import GeoSeries
 
 from lib.io_utils import load_points_async
@@ -42,7 +41,7 @@ async def main() -> None:
 	argparser.add_argument(
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
-	argparser.add_argument('--concave', action='store_true', help='Create a concave hull instead')
+	argparser.add_argument('--convex', action='store_true', help='Create a convex hull instead (simpler computation, probably less useful/interesting)')
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(
@@ -53,7 +52,7 @@ async def main() -> None:
 		has_header=False if args.unheadered else None,
 	)
 	union = gdf.union_all()
-	hull = shapely.concave_hull(union) if args.concave else shapely.convex_hull(union)
+	hull = shapely.convex_hull(union) if args.convex else shapely.concave_hull(union)
 	s = GeoSeries([hull], crs=gdf.crs)
 	await asyncio.to_thread(s.to_file, args.output_path)
 
