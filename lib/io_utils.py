@@ -91,7 +91,7 @@ def geodataframe_to_csv(
 	lng_col_name: Hashable = 'lng',
 	*,
 	include_z: bool = False,
-	insert_before: bool = False,
+	insert_before: bool = True,
 	index: bool = True,
 ):
 	"""Outputs a GeoDataFrame to CSV with lat and lng columns."""

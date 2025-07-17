@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 
 from lib.format_utils import describe_point, format_point
 from lib.geo_utils import get_midpoint
-from lib.io_utils import load_points_async
+from lib.io_utils import geodataframe_to_csv, load_points_async
 
 
 async def get_row_midpoint(
@@ -63,7 +63,10 @@ async def main() -> None:
 	gdf = geopandas.GeoDataFrame(data, crs='wgs84')
 	print(gdf)
 	if args.out_path:
-		gdf.to_file(args.out_path)
+		if args.out_path.suffix[1:].lower() == 'csv':
+			await asyncio.to_thread(geodataframe_to_csv, gdf, args.out_path, index=False)
+		else:
+			await asyncio.to_thread(gdf.to_file, args.out_path)
 
 
 if __name__ == '__main__':
