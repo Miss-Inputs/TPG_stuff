@@ -222,6 +222,7 @@ async def output_season(season: Season, path: Path, *, detailed_stats: bool = Fa
 			'Submission centroid lng': stat.centroid.x,
 			'Raw centroid lng': stat.centroid_raw.y,
 			'Raw centroid lat': stat.centroid_raw.x,
+			'Number of submissions': stat.player_count,
 		}
 		for round_name, stat in season.stats.items()
 	]

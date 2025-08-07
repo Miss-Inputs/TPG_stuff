@@ -23,6 +23,7 @@ class RoundStats:
 	"""Centroid of all submissions"""
 	centroid_raw: Point
 	"""Centroid of all submissions, including submissions that are so far away that they get 0 distance points"""
+	player_count: int
 
 
 def get_round_stats(r: 'SubmissionTrackerRound', world_distance: float | None = None):
@@ -51,7 +52,7 @@ def get_round_stats(r: 'SubmissionTrackerRound', world_distance: float | None = 
 	centroid = all_points.centroid
 	all_points_raw = shapely.MultiPoint([sub.point for sub in r.submissions])
 	centroid_raw = all_points_raw.centroid
-	return RoundStats(float(avg), float(avg_raw), centroid, centroid_raw)
+	return RoundStats(float(avg), float(avg_raw), centroid, centroid_raw, n)
 
 
 def get_longest_distance(poly: Polygon | MultiPolygon):
