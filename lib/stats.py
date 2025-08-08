@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from itertools import combinations, starmap
+from itertools import combinations
 from typing import TYPE_CHECKING
 
 import numpy
@@ -57,7 +57,8 @@ def get_round_stats(r: 'SubmissionTrackerRound', world_distance: float | None = 
 
 def get_longest_distance(poly: Polygon | MultiPolygon):
 	vertices = get_poly_vertices(poly)
-	return max(starmap(shapely.distance, combinations(vertices, 2)))
+	distances = (float(shapely.distance(x, y)) for x, y in combinations(vertices, 2))
+	return max(distances)
 
 
 def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
