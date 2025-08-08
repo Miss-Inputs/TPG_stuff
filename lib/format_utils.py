@@ -96,12 +96,35 @@ def get_ordinal(n: int) -> str:
 		return 'th'
 	return {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
 
+
 def format_ordinal(n: float) -> str:
 	if not n.is_integer():
-		#meh
+		# meh
 		return f'{n:.2f}th'
 	n = int(n)
 	return f'{n}{get_ordinal(n)}'
+
+
+def format_number(n: float, decimal_places: int = 6):
+	"""Stops printing annoying stupid scientific notation which looks ugly and sucks grawwrrrr"""
+	if n.is_integer():
+		return f'{n:n}'
+	return f'{n:,.{decimal_places}f}'.rstrip('0')
+
+
+def format_distance(n: float, decimal_places: int = 6, unit: str = 'm'):
+	if n > 1_000:
+		return f'{format_number(n / 1_000, decimal_places)}k{unit}'
+	if n < 1e-2:
+		return f'{format_number(n * 100, decimal_places)}c{unit}'
+	return f'{format_number(n, decimal_places)}{unit}'
+
+
+def format_area(n: float, decimal_places: int = 6, unit: str = 'm²'):
+	if n > 1_000_000:
+		return f'{format_number(n / 1_000_000, decimal_places)}k{unit}'
+	return f'{format_number(n, decimal_places)}{unit}'
+
 
 async def print_round(n: int, row: Any, sesh: 'ClientSession'):
 	loc_address = await reverse_geocode_address(row.target_lat, row.target_lng, sesh)
@@ -109,11 +132,11 @@ async def print_round(n: int, row: Any, sesh: 'ClientSession'):
 	sub_address = await reverse_geocode_address(row.latitude, row.longitude, sesh)
 	print(f'Submission: {row.latitude}, {row.longitude} {sub_address}')
 	print(
-		f'Distance: {row.distance / 1000:4g}km Place: {row.place}/{row.total_subs} Score: {row.score}'
+		f'Distance: {format_distance(row.distance)}km Place: {row.place}/{row.total_subs} Score: {row.score}'
 	)
 	with contextlib.suppress(AttributeError):
 		print(
-			f'Geodesic distance: {row.geod_distance / 1000:.4g}km Heading from photo to loc: {row.heading}°'
+			f'Geodesic distance: {format_distance(row.geod_distance)} Heading from photo to loc: {row.heading}°'
 		)
 
 	print('-' * 10)
