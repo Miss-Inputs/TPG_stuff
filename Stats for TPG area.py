@@ -36,8 +36,14 @@ async def main() -> None:
 		maybe_cats = nunique[nunique < (gdf.index.size // 2)]
 		cat_cols = maybe_cats.index.to_list()
 
-	centroid = gdf.union_all().centroid
+	union = gdf.union_all()
+	centroid = union.centroid
 	print('Centroid:', format_point(centroid))
+	print('Representative point:', format_point(union.representative_point()))
+	print('Pole of inaccessibility:', format_point(shapely.Point(shapely.maximum_inscribed_circle(union).coords[0])))
+	min_bounding_circle = shapely.minimum_bounding_circle(union)
+	#TODO: This should be using the projected CRS at the bottom there, and then transforming back to WGS84
+	print('Minimum bounding circle centroid:', format_point(min_bounding_circle.centroid))
 
 	metres = gdf.to_crs(crs)
 	metres['area'] = metres.area
@@ -45,14 +51,16 @@ async def main() -> None:
 	print('Total area:', format_area(total_area))
 
 	for cat_col in cat_cols:
+		grouper = metres.groupby(cat_col, sort=False)['area']
 		areas = (
-			metres.groupby(cat_col, sort=False)['area']
+			grouper
 			.sum()
 			.sort_values(ascending=False)
 			.to_frame()
 		)
 		areas['percent'] = (areas / total_area).map('{:%}'.format)
 		areas['area'] = areas['area'].map(format_area)
+		areas['count'] = grouper.size()
 		print(areas)
 
 	coverage_valid = metres.is_valid_coverage()
