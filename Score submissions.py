@@ -152,7 +152,6 @@ class Season:
 
 def score_kml(
 	path: Path | Sequence[Path],
-	reminder_list: Collection[str],
 	world_distance: float = 5000.0,
 	fivek_threshold: float = 0.1,
 	*,
@@ -316,7 +315,6 @@ async def main() -> None:
 		reminder_list = await read_lines_async(reminder_list_path) if reminder_list_path else ()
 		season = score_kml(
 			paths,
-			reminder_list,
 			world_distance,
 			fivek_threshold,
 			use_haversine_for_score=use_haversine,
