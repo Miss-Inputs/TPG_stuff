@@ -60,18 +60,46 @@ async def main() -> None:
 	union = metres.union_all('coverage' if coverage_valid else 'unary')
 	if not isinstance(union, (Polygon, MultiPolygon)):
 		raise TypeError(type(union))
-	centroid = ops.transform(crs_to_wgs84.transform, union.centroid)
-	print('Centroid:', format_point(centroid))
-	rep_point = ops.transform(crs_to_wgs84.transform, union.representative_point())
-	print('Representative point:', format_point(rep_point))
-	max_inscribed_circle = shapely.maximum_inscribed_circle(union)
-	pole_of_inaccessibility = ops.transform(
-		crs_to_wgs84.transform, shapely.get_point(max_inscribed_circle, 0)
+	centroid = union.centroid
+	print('Centroid:', format_point(ops.transform(crs_to_wgs84.transform, centroid)))
+	print(
+		'Centroid snapped to area:',
+		format_point(ops.transform(crs_to_wgs84.transform, ops.nearest_points(centroid, union)[1])),
 	)
-	print('Pole of inaccessibility:', format_point(pole_of_inaccessibility))
+	rep_point = union.representative_point()
+	print('Representative point:', format_point(ops.transform(crs_to_wgs84.transform, rep_point)))
+	print(
+		'Representative point snapped to area:',
+		format_point(
+			ops.transform(crs_to_wgs84.transform, ops.nearest_points(rep_point, union)[1])
+		),
+	)
+	max_inscribed_circle = shapely.maximum_inscribed_circle(union)
+	pole_of_inaccessibility = shapely.get_point(max_inscribed_circle, 0)
+	print(
+		'Pole of inaccessibility, probably wrong/meaningless if multipolygon:',
+		format_point(ops.transform(crs_to_wgs84.transform, pole_of_inaccessibility)),
+	)
+	print(
+		'Pole of inaccessibility snapped to area:',
+		format_point(
+			ops.transform(
+				crs_to_wgs84.transform, ops.nearest_points(pole_of_inaccessibility, union)[1]
+			)
+		),
+	)
 	min_bounding_circle = shapely.minimum_bounding_circle(union)
-	min_circle_centroid = ops.transform(crs_to_wgs84.transform, min_bounding_circle.centroid)
-	print('Minimum bounding circle centroid:', format_point(min_circle_centroid))
+	min_circle_centroid = min_bounding_circle.centroid
+	print(
+		'Minimum bounding circle centroid (minimized maximum distance to random points):',
+		format_point(ops.transform(crs_to_wgs84.transform, min_circle_centroid)),
+	)
+	print(
+		'Minimum bounding circle centroid snapped to area:',
+		format_point(
+			ops.transform(crs_to_wgs84.transform, ops.nearest_points(min_circle_centroid, union)[1])
+		),
+	)
 
 	bounds = union.envelope
 	print('Bounding box size:', format_area(bounds.area))
