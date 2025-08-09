@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 
+import asyncio
 import logging
-from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
 
 import geopandas
 import pandas
-from pydantic_settings import CliApp, CliSettingsSource
+import pydantic_core
+from aiohttp import ClientSession
+from pydantic import TypeAdapter
 
 from lib.io_utils import format_path, latest_file_matching_format_pattern
-from lib.tastycheese_map import load_or_get_submissions, submission_json_adapter
+from lib.tpg_api import get_all_submissions, get_players, get_rounds
 from settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -26,55 +28,86 @@ def _group_rounds(group: pandas.DataFrame):
 	return first
 
 
-def _add_additional_data(subs: dict[int, list[dict[str, Any]]], path: Path):
-	"""For loading additional data from JSON converted from KML exported from submission tracker"""
-	data = submission_json_adapter.validate_json(path.read_bytes())
-	for round_num, new_subs in data.items():
-		subs.setdefault(round_num, [])
-		existing_names = {s['name'] for s in subs[round_num]}
-		existing_usernames = {s['username'] for s in subs[round_num]}
-		for sub in new_subs:
-			del sub['place'] #Will recalculate this when/if recalculating scores to avoid screwiness
-			if sub['name'] in existing_names or sub['username'] in existing_usernames:
-				# Trust the existing data if it is there
-				logger.info(
-					'Not overwriting existing submission for %s (%s) in round %s',
-					sub['name'],
-					sub['username'],
-					round_num,
-				)
-				continue
-			subs[round_num].append(sub)
+async def get_submissions(
+	max_round_num: int, session: ClientSession, path: Path | None = None
+) -> dict[int, list[dict[str, Any]]]:
+	"""Gets all submissions and optionally saves it to a file as JSON.
+
+	Arguments:
+		path: Path which doesn't need to exist yet. {} will be replaced with the number of the latest round.
+		max_round_num: Latest round number if known, this will also display the progress bar better.
+
+	Returns:
+		{round number: list of submissions converted to dict}."""
+	all_submissions = await get_all_submissions(max_round_num, session)
+	players = await get_players(session)
+	names = {p.discord_id: p.name for p in players}
+	data = {
+		round_num: [s.model_dump() | {'name': names.get(s.discord_id, s.discord_id)} for s in subs]
+		for round_num, subs in all_submissions.items()
+	}
+
+	if path:
+		j = pydantic_core.to_json(data)
+		path = format_path(path, max(all_submissions.keys()))
+		path.write_bytes(j)
+	return data
 
 
-def main() -> None:
-	argparser = ArgumentParser()
-	argparser.add_argument(
-		'--additional-data-paths',
-		type=Path,
-		nargs='*',
-		help='Load more submissions from other JSON files as well',
-	)
-	settings_source = CliSettingsSource(Settings, root_parser=argparser)
-	settings = CliApp.run(Settings, cli_settings_source=settings_source)
-	args = argparser.parse_args()
-	additional_paths = args.additional_data_paths
+submission_json_adapter = TypeAdapter(dict[int, list[dict[str, Any]]])
 
-	if settings.rounds_path:
-		rounds_path = latest_file_matching_format_pattern(settings.rounds_path)
-		rounds = geopandas.read_file(rounds_path)
-		assert isinstance(rounds, geopandas.GeoDataFrame), type(rounds)
-		max_round_num = rounds['number'].max()
-	else:
-		max_round_num = None
 
-	subs = load_or_get_submissions(settings.submissions_path, max_round_num)
-	if additional_paths:
-		for additional_path in additional_paths:
-			_add_additional_data(subs, additional_path)
+async def load_or_get_submissions(
+	max_round_num: int, session: ClientSession, path: Path | None = None
+) -> dict[int, list[dict[str, Any]]]:
+	"""If path is provided, loads all submissions from that file if it exists (and if max_round_num is known, that the file is up to the most recent round), or gets them and saves them as JSON if not. Recommended to avoid spamming the endpoint every time.
+	If path is None, behaves the same as get_submissions.
+
+	Arguments:
+		path: Path to a JSON. If it doesn't exist, {} will be replaced with the number of the latest round.
+		max_round_num: Latest round number if known, this will also display the progress bar better.
+
+	Returns:
+		{round number: list of submissions converted to dict}.
+	"""
+	if not path:
+		return await get_submissions(max_round_num, session, path)
+	try:
+		latest_path = latest_file_matching_format_pattern(path)
+	except ValueError:
+		# file not there
+		return await get_submissions(max_round_num, session, path)
+
+	# Ensure we create a new file if we have more rounds
+	latest_path_stem = path.stem.format(max_round_num)
+	if latest_path.stem != latest_path_stem:
+		latest_path = latest_path.with_stem(latest_path_stem)
+
+	try:
+		contents = latest_path.read_bytes()
+		subs = submission_json_adapter.validate_json(contents)
+	except FileNotFoundError:
+		subs = await get_submissions(max_round_num, session, path)
+	return subs
+
+
+async def main() -> None:
+	settings = Settings()
+
+	async with ClientSession() as sesh:
+		if settings.rounds_path:
+			rounds_path = latest_file_matching_format_pattern(settings.rounds_path)
+			rounds = geopandas.read_file(rounds_path)
+			assert isinstance(rounds, geopandas.GeoDataFrame), type(rounds)
+			max_round_num = rounds['number'].max()
+		else:
+			max_round_num = max(r.number for r in await get_rounds(sesh))
+
+		subs = await load_or_get_submissions(max_round_num, sesh, settings.submissions_path)
+
 	rows = []
-	for round_num, round_subs in subs.items():
-		rows += [{'round': round_num, **sub, 'total_subs': len(round_subs)} for sub in round_subs]
+	for round_subs in subs.values():
+		rows += [{**sub, 'total_subs': len(round_subs)} for sub in round_subs]
 	df = pandas.DataFrame(rows)
 
 	if settings.submissions_path:
@@ -100,4 +133,4 @@ def main() -> None:
 
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
-	main()
+	asyncio.run(main(), debug=False)
