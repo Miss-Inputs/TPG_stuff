@@ -37,10 +37,23 @@ async def main() -> None:
 		maybe_cats = nunique[nunique < (gdf.index.size // 2)]
 		cat_cols = maybe_cats.index.to_list()
 
+	invalid_reasons = gdf.is_valid_reason()
+	invalid_reasons = invalid_reasons[invalid_reasons != 'Valid Geometry']
+	if not invalid_reasons.empty:
+		print('Invalid geometries:')
+		print(invalid_reasons)
+
 	metres = gdf.to_crs(crs)
 	metres['area'] = metres.area
 	total_area = metres['area'].sum()
 	print('Total area:', format_area(total_area))
+	invalid_reasons = metres.is_valid_reason()
+	invalid_reasons = invalid_reasons[invalid_reasons != 'Valid Geometry']
+	if not invalid_reasons.empty:
+		print('Invalid geometries after converting to metres CRS:')
+		print(invalid_reasons)
+		# metres = metres.set_geometry(metres.make_valid())
+		metres = metres.drop(index=invalid_reasons.index)
 
 	for cat_col in cat_cols:
 		grouper = metres.groupby(cat_col, sort=False)['area']
@@ -114,6 +127,11 @@ async def main() -> None:
 	print('Convex hull size:', format_area(convex_hull.area))
 	max_convex_dist = get_longest_distance(convex_hull)
 	print('Longest distance inside convex hull:', format_distance(max_convex_dist))
+	convex_centroid = convex_hull.centroid
+	print(
+		'Convex hull centroid:',
+		format_point(ops.transform(crs_to_wgs84.transform, convex_centroid)),
+	)
 
 
 if __name__ == '__main__':
