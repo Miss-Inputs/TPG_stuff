@@ -1,3 +1,4 @@
+"""API for tastyCheese's old TPG site, which is not updated anymore as of the start of season 3, but it's still there"""
 from pathlib import Path
 from typing import Any, Literal
 

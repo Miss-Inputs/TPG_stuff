@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 
+import asyncio
+
 import geopandas
 import pandas
 
 from lib.io_utils import format_path
-from lib.tastycheese_map import get_tpg_rounds
+from lib.tpg_api import get_rounds
 from settings import Settings
 
 
-def main() -> None:
+async def main() -> None:
 	settings = Settings()
 
-	rounds = [r.model_dump() for r in get_tpg_rounds()]
+	rounds = [r.model_dump() for r in await get_rounds()]
 	df = pandas.DataFrame(rounds)
+	df = df.sort_values('number')
 	print(df)
 	geom = geopandas.points_from_xy(df['longitude'], df['latitude'], crs='wgs84')
 	gdf = geopandas.GeoDataFrame(df.drop(columns=['latitude', 'longitude']), geometry=geom)
@@ -24,4 +27,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-	main()
+	asyncio.run(main())
