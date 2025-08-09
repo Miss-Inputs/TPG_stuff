@@ -69,9 +69,7 @@ def plot_submissions(
 	else:
 		gdf.plot(color='green', markersize=marker_size, ax=ax)
 
-	contextily.add_basemap(
-		ax, source='http://mt.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', crs=gdf.crs
-	)
+	contextily.add_basemap(ax, source=provider, crs=gdf.crs)
 	ax.set_axis_off()
 	fig.tight_layout()
 
