@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pyproj
 import shapely
-from shapely import MultiPolygon, Polygon
+from shapely import MultiPolygon, Polygon, ops
 
 from lib.format_utils import format_area, format_distance, format_point
 from lib.io_utils import read_geodataframe_async
@@ -29,21 +29,13 @@ async def main() -> None:
 	path = args.path
 	gdf = await read_geodataframe_async(path)
 	crs = pyproj.CRS(args.metres_crs) if args.metres_crs else gdf.estimate_utm_crs()
+	crs_to_wgs84 = pyproj.Transformer.from_crs(crs, 'wgs84', always_xy=True)
 	cat_cols: list[str] = args.category
 
 	if not cat_cols:
 		nunique = gdf.drop(columns='geometry').nunique()
 		maybe_cats = nunique[nunique < (gdf.index.size // 2)]
 		cat_cols = maybe_cats.index.to_list()
-
-	union = gdf.union_all()
-	centroid = union.centroid
-	print('Centroid:', format_point(centroid))
-	print('Representative point:', format_point(union.representative_point()))
-	print('Pole of inaccessibility:', format_point(shapely.Point(shapely.maximum_inscribed_circle(union).coords[0])))
-	min_bounding_circle = shapely.minimum_bounding_circle(union)
-	#TODO: This should be using the projected CRS at the bottom there, and then transforming back to WGS84
-	print('Minimum bounding circle centroid:', format_point(min_bounding_circle.centroid))
 
 	metres = gdf.to_crs(crs)
 	metres['area'] = metres.area
@@ -52,12 +44,7 @@ async def main() -> None:
 
 	for cat_col in cat_cols:
 		grouper = metres.groupby(cat_col, sort=False)['area']
-		areas = (
-			grouper
-			.sum()
-			.sort_values(ascending=False)
-			.to_frame()
-		)
+		areas = grouper.sum().sort_values(ascending=False).to_frame()
 		areas['percent'] = (areas / total_area).map('{:%}'.format)
 		areas['area'] = areas['area'].map(format_area)
 		areas['count'] = grouper.size()
@@ -73,6 +60,19 @@ async def main() -> None:
 	union = metres.union_all('coverage' if coverage_valid else 'unary')
 	if not isinstance(union, (Polygon, MultiPolygon)):
 		raise TypeError(type(union))
+	centroid = ops.transform(crs_to_wgs84.transform, union.centroid)
+	print('Centroid:', format_point(centroid))
+	rep_point = ops.transform(crs_to_wgs84.transform, union.representative_point())
+	print('Representative point:', format_point(rep_point))
+	max_inscribed_circle = shapely.maximum_inscribed_circle(union)
+	pole_of_inaccessibility = ops.transform(
+		crs_to_wgs84.transform, shapely.get_point(max_inscribed_circle, 0)
+	)
+	print('Pole of inaccessibility:', format_point(pole_of_inaccessibility))
+	min_bounding_circle = shapely.minimum_bounding_circle(union)
+	min_circle_centroid = ops.transform(crs_to_wgs84.transform, min_bounding_circle.centroid)
+	print('Minimum bounding circle centroid:', format_point(min_circle_centroid))
+
 	bounds = union.envelope
 	print('Bounding box size:', format_area(bounds.area))
 	min_x, min_y, max_x, max_y = union.bounds
@@ -86,7 +86,6 @@ async def main() -> None:
 	print('Convex hull size:', format_area(convex_hull.area))
 	max_convex_dist = get_longest_distance(convex_hull)
 	print('Longest distance inside convex hull:', format_distance(max_convex_dist))
-
 
 
 if __name__ == '__main__':
