@@ -58,7 +58,6 @@ def plot_visitors(visitors: geopandas.GeoDataFrame, output_path: Path | None):
 
 def main() -> None:
 	argparser = ArgumentParser()
-	# TODO: Enable creating a map from GeoJSON points instead
 	argparser.add_argument(
 		'path', type=Path, help='Path to KML/KMZ file from the submission tracker', nargs='+'
 	)
@@ -80,8 +79,11 @@ def main() -> None:
 
 	args = argparser.parse_args()
 	paths: list[Path] = args.path
-
-	submissions = get_submissions(paths)
+	
+	if len(paths) == 1 and paths[0].suffix[1:].lower() == 'geojson':
+		submissions = read_geodataframe(paths[0])
+	else:
+		submissions = get_submissions(paths)
 	regions = read_geodataframe(args.regions)
 	assert submissions.crs, 'What did you do to my CRS'
 	regions = regions.to_crs(submissions.crs)
@@ -89,7 +91,7 @@ def main() -> None:
 	name_col: str = args.name_col or regions.drop(columns='geometry').columns[0]
 
 	visitors_by_region = get_num_visitors_by_region(submissions, regions, name_col)
-	print(visitors_by_region['count'].sort_values(ascending=False).to_string())
+	print(visitors_by_region[['count', 'visitors']].sort_values('count', ascending=False).to_string(max_colwidth=40))
 	if not isinstance(visitors_by_region, geopandas.GeoDataFrame):
 		raise TypeError(f'Uh oh visitors_by_region is {type(visitors_by_region)}')
 	plot_visitors(visitors_by_region, args.output_path)
