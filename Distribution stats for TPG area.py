@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+
+from argparse import ArgumentParser
+from pathlib import Path
+
+from lib.format_utils import format_area
+from lib.io_utils import read_geodataframe
+
+
+def main() -> None:
+	argparser = ArgumentParser()
+	argparser.add_argument(
+		'path', type=Path, help='Path to GeoJSON/.gpkg/etc file containing the TPG area'
+	)
+	argparser.add_argument(
+		'regions', type=Path, help='Path to GeoJSON/.gpkg/etc file containing regions as polygons'
+	)
+	argparser.add_argument(
+		'--name-col',
+		help='Name of column in regions file to use, if not specified then try to autodetect',
+	)
+	argparser.add_argument(
+		'--metres-crs',
+		help='Override CRS used for area computations, should be something with metres as the unit',
+	)
+
+	args = argparser.parse_args()
+
+	gdf = read_geodataframe(args.path)
+	regions = read_geodataframe(args.regions)
+	regions = regions.dropna(subset='geometry')
+
+	if gdf.crs:
+		if regions.crs != gdf.crs:
+			regions = regions.to_crs(gdf.crs)
+			print(f'regions to {gdf.crs}')
+	elif regions.crs:
+		gdf = gdf.to_crs(regions.crs)
+		print(f'gdf to {regions.crs}')
+	else:
+		gdf = gdf.set_crs('wgs84')
+		regions = regions.set_crs('wgs84')
+
+	name_col: str = args.name_col or regions.drop(columns='geometry').columns[0]
+	if name_col in gdf.columns:
+		regions = regions.rename(columns={name_col: f'regions_{name_col}'})
+		name_col = f'regions_{name_col}'
+	regions = regions[[name_col, 'geometry']]
+	regions = regions.clip(gdf, keep_geom_type=True)
+	gdf = gdf.overlay(regions, 'identity', keep_geom_type=True)
+
+	metres_crs = args.metres_crs or gdf.estimate_utm_crs()
+	metres = gdf.to_crs(metres_crs)
+	metres['area'] = metres.area
+	total_area = metres['area'].sum()
+
+	area_by_region = metres.groupby(name_col, sort=False, dropna=False)['area'].sum()
+	area_by_region = area_by_region.sort_values(ascending=False)
+	area_by_region = area_by_region.to_frame()
+	area_by_region['percent'] = (area_by_region['area'] / total_area).map('{:%}'.format)
+	area_by_region['area'] = area_by_region['area'].map(format_area)
+	print(area_by_region.to_string(max_colwidth=40))
+
+
+if __name__ == '__main__':
+	main()
