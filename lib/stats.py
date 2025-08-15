@@ -1,3 +1,4 @@
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 from typing import TYPE_CHECKING
@@ -78,3 +79,10 @@ def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
 	antipoint = df.loc[idxmax, 'point']
 	assert isinstance(antipoint, Point), type(antipoint)
 	return antipoint, float(df.loc[idxmax, 'distance'])  # type: ignore[arg-type]
+
+def summarize_counter[T](counter: Counter[T]):
+	counts = pandas.Series(counter)
+	percents = counts / counter.total()
+	percents_formatted = percents.map('{:%}'.format)
+	df = pandas.DataFrame({'count': counts, 'percent': percents_formatted})
+	return df.sort_values('count', ascending=False)

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections.abc import Hashable, Iterable, Sequence
+from contextlib import nullcontext
 from functools import partial
 from itertools import chain, combinations
 from typing import Any, overload
@@ -102,13 +103,14 @@ def haversine_distance(
 	c = 2 * numpy.asin(numpy.sqrt(a))
 	return c * r
 
+RandomSeed = numpy.random.Generator | numpy.random.BitGenerator | numpy.random.SeedSequence | int | None
 
 def random_point_in_bbox(
 	min_x: float,
 	min_y: float,
 	max_x: float,
 	max_y: float,
-	random: numpy.random.Generator | int | None = None,
+	random: RandomSeed = None,
 ) -> shapely.Point:
 	"""Uniformly generates a point somewhere in a bounding box."""
 	if not isinstance(random, numpy.random.Generator):
@@ -119,7 +121,7 @@ def random_point_in_bbox(
 
 
 def random_point_in_poly(
-	poly: shapely.Polygon | shapely.MultiPolygon, random: numpy.random.Generator | int | None = None
+	poly: shapely.Polygon | shapely.MultiPolygon, random: RandomSeed = None, *, use_tqdm: bool=False, **tqdm_kwargs
 ) -> shapely.Point:
 	"""
 	Uniformly-ish generates a point somewhere within a polygon.
@@ -131,10 +133,17 @@ def random_point_in_poly(
 	"""
 	min_x, max_x, min_y, max_y = poly.bounds
 	shapely.prepare(poly)
-	while True:
-		point = random_point_in_bbox(min_x, max_x, min_y, max_y, random)
-		if poly.contains_properly(point):
-			return point
+	if not isinstance(random, numpy.random.Generator):
+		random = numpy.random.default_rng(random)
+		print(random.bit_generator.seed_seq)
+	t = tqdm(**tqdm_kwargs) if use_tqdm else nullcontext()
+	with t:
+		while True:
+			if isinstance(t, tqdm):
+				t.update(1)
+			point = random_point_in_bbox(min_x, max_x, min_y, max_y, random)
+			if poly.contains_properly(point):
+				return point
 
 
 def circular_mean(angles: list[float] | numpy.ndarray) -> float:
