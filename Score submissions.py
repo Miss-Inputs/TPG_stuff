@@ -19,7 +19,7 @@ import pandas
 from aiohttp import ClientSession
 from shapely import Point
 
-from lib.format_utils import describe_point
+from lib.format_utils import describe_point, format_distance
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import geodataframe_to_csv, read_lines_async
 from lib.kml import SubmissionTrackerRound, parse_submission_kml
@@ -149,6 +149,10 @@ class Season:
 	current_round_names: list[str]
 	"""Names of players who have submitted in the current round"""
 
+def _print_round_scores(gdf: geopandas.GeoDataFrame):
+	scores = gdf.copy().drop(columns='style')
+	scores['distance'] = (scores['distance'] * 1000).map(format_distance)
+	print(scores.to_string(max_colwidth=40))
 
 def score_kml(
 	path: Path | Sequence[Path],
@@ -178,7 +182,7 @@ def score_kml(
 		allow_negative=allow_negative,
 	):
 		# TODO: Put this outputtery somewhere else
-		print(gdf.drop(columns='style'))
+		_print_round_scores(gdf)
 		print('-' * 10)
 		out_path = (
 			path.with_name(f'{path.stem} - {r.name}.csv')
