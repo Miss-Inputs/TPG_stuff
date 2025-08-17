@@ -135,7 +135,6 @@ def random_point_in_poly(
 	shapely.prepare(poly)
 	if not isinstance(random, numpy.random.Generator):
 		random = numpy.random.default_rng(random)
-		print(random.bit_generator.seed_seq)
 	t = tqdm(**tqdm_kwargs) if use_tqdm else nullcontext()
 	with t:
 		while True:

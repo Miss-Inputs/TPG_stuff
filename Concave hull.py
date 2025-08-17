@@ -9,6 +9,7 @@ import pyproj
 import shapely
 from geopandas import GeoSeries
 
+from lib.format_utils import format_area, format_distance
 from lib.io_utils import load_points_async
 
 
@@ -60,8 +61,9 @@ async def main() -> None:
 		s = s.to_crs('wgs84')
 		hull = s.geometry[0]
 	geod = pyproj.Geod(ellps='WGS84')
-	area, _perimeter = geod.geometry_area_perimeter(hull)
-	print(f'Area: {abs(area) / 1_000_000}')
+	area, perimeter = geod.geometry_area_perimeter(hull)
+	print(f'Area: {format_area(abs(area))}')
+	print(f'Perimeter: {format_distance(perimeter)}')
 
 
 if __name__ == '__main__':
