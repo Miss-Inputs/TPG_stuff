@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import asyncio
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -8,11 +7,11 @@ import shapely
 from shapely import MultiPolygon, Polygon, ops
 
 from lib.format_utils import format_area, format_distance, format_point
-from lib.io_utils import read_geodataframe_async
+from lib.io_utils import read_geodataframe
 from lib.stats import get_longest_distance
 
 
-async def main() -> None:
+def main() -> None:
 	argparser = ArgumentParser()
 	argparser.add_argument('path', type=Path, help='Path to geojson/gpkg/etc file')
 	argparser.add_argument(
@@ -27,14 +26,15 @@ async def main() -> None:
 	args = argparser.parse_args()
 
 	path = args.path
-	gdf = await read_geodataframe_async(path)
+	gdf = read_geodataframe(path)
 	crs = pyproj.CRS(args.metres_crs) if args.metres_crs else gdf.estimate_utm_crs()
 	crs_to_wgs84 = pyproj.Transformer.from_crs(crs, 'wgs84', always_xy=True)
 	cat_cols: list[str] = args.category
 
 	if not cat_cols:
-		nunique = gdf.drop(columns='geometry').nunique()
-		maybe_cats = nunique[nunique < (gdf.index.size // 2)]
+		counts = gdf.count(axis='index')
+		nunique = gdf[counts[counts > 1].index.to_list()].drop(columns='geometry').nunique()
+		maybe_cats = nunique[(nunique > 1) & (nunique < (gdf.index.size // 2))]
 		cat_cols = maybe_cats.index.to_list()
 
 	invalid_reasons = gdf.is_valid_reason()
@@ -135,4 +135,4 @@ async def main() -> None:
 
 
 if __name__ == '__main__':
-	asyncio.run(main(), debug=False)
+	main()
