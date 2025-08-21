@@ -72,7 +72,13 @@ def read_geodataframe(path: Path) -> geopandas.GeoDataFrame:
 			# shut up nerd I don't care if it has a GPKG application_id or whatever
 			gdf = geopandas.read_file(zst)
 	else:
-		gdf = geopandas.read_file(path)
+		with (
+			path.open('rb') as _f,
+			tqdm.wrapattr(_f, 'read', path.stat().st_size, desc=f'Reading {path}') as f,
+			warnings.catch_warnings(category=RuntimeWarning, action='ignore'),
+		):
+			# shut up nerd I don't care if it has a GPKG application_id or whatever
+			gdf = geopandas.read_file(f)
 	if not isinstance(gdf, geopandas.GeoDataFrame):
 		# Not sure if this ever happens, or if the type hint is just like that
 		raise TypeError(f'Expected {path} to contain GeoDataFrame, got {type(gdf)}')

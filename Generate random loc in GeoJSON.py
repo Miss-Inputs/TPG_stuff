@@ -151,10 +151,14 @@ async def main() -> None:
 	to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
 
-	poly = gdf.union_all()
-	if not isinstance(poly, (Polygon, MultiPolygon)):
-		# TODO: Support points as well
-		raise TypeError(f'{path} must contain polygon(s), got {type(poly)}')
+	if gdf.index.size == 1 and isinstance(gdf.geometry.iloc[0], (Polygon, MultiPolygon)):
+		poly = gdf.geometry.iloc[0]
+		assert isinstance(poly, (Polygon, MultiPolygon)), 'what'
+	else:
+		poly = gdf.union_all()
+		if not isinstance(poly, (Polygon, MultiPolygon)):
+			# TODO: Support points as well
+			raise TypeError(f'{path} must contain polygon(s), got {type(poly)}')
 
 	n: int = args.n
 	seed: int | None = args.seed
