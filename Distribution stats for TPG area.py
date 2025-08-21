@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 from argparse import ArgumentParser
+from datetime import timedelta
 from pathlib import Path
+from time import perf_counter
 
 from lib.format_utils import format_area
 from lib.io_utils import read_geodataframe
@@ -33,10 +35,10 @@ def main() -> None:
 	if gdf.crs:
 		if regions.crs != gdf.crs:
 			regions = regions.to_crs(gdf.crs)
-			print(f'regions to {gdf.crs}')
+			print(f'Reprojected regions to gdf crs: {gdf.crs}')
 	elif regions.crs:
 		gdf = gdf.to_crs(regions.crs)
-		print(f'gdf to {regions.crs}')
+		print(f'Reprojected gdf to regions crs: {regions.crs}')
 	else:
 		gdf = gdf.set_crs('wgs84')
 		regions = regions.set_crs('wgs84')
@@ -46,8 +48,11 @@ def main() -> None:
 		regions = regions.rename(columns={name_col: f'regions_{name_col}'})
 		name_col = f'regions_{name_col}'
 	regions = regions[[name_col, 'geometry']]
-	regions = regions.clip(gdf, keep_geom_type=True)
+	regions = regions.clip(tuple(gdf.total_bounds), keep_geom_type=True)  # pyright: ignore[reportArgumentType]
+	print('Combining gdf with regions, this can take some time')
+	time_started = perf_counter()
 	gdf = gdf.overlay(regions, 'identity', keep_geom_type=True)
+	print(f'Done in {timedelta(seconds=perf_counter() - time_started)}')
 
 	metres_crs = args.metres_crs or gdf.estimate_utm_crs()
 	metres = gdf.to_crs(metres_crs)
