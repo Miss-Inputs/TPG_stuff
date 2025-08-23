@@ -104,7 +104,7 @@ async def reverse_geocode_address(
 	lng: float,
 	session: aiohttp.ClientSession,
 	lang: str = 'en',
-	request_timeout: int = 10,
+	request_timeout: int = 30,
 ) -> str | None:
 	"""Finds an address for a point using asynchronous requests.
 
@@ -115,7 +115,7 @@ async def reverse_geocode_address(
 		lat: Latitude of point in WGS84.
 		lng: Longitude of point in WGS84.
 		session: Optional requests.Session if you have one, otherwise does not use a session. Recommended if you are using this in a loop, etc.
-		timeout: Request timeout in seconds, defaults to 10 seconds.
+		timeout: Request timeout in seconds, defaults to 30 seconds.
 
 	Returns:
 		Address as string, or None if nothing could be found.

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 async def _reverse_geocode_row(session: ClientSession, index: Hashable, geometry: 'BaseGeometry'):
 	if not isinstance(geometry, Point):
-		#Feels like it'd be a bit annoying to raise an error here so I'll just pretend it was a point all along
+		# Feels like it'd be a bit annoying to raise an error here so I'll just pretend it was a point all along
 		geometry = geometry.representative_point()
 	return index, await reverse_geocode_address(geometry.y, geometry.x, session)
 
@@ -53,6 +53,11 @@ async def main() -> None:
 	argparser.add_argument(
 		'--output-path', type=Path, help='Optional path to write a .csv file with the results'
 	)
+	argparser.add_argument(
+		'--column-name',
+		help='Name of column with the results, defaults to "address"',
+		default='address',
+	)
 
 	argparser.add_argument(
 		'--lat-column',
@@ -83,10 +88,14 @@ async def main() -> None:
 		crs=args.crs,
 		has_header=False if args.unheadered else None,
 	)
-	await reverse_geocode_all(gdf)
+	await reverse_geocode_all(gdf, args.column_name)
 	print(gdf)
-	if args.output_path:
-		geodataframe_to_csv(gdf, args.output_path, insert_before=True, index=False)
+	output_path: Path | None = args.output_path
+	if output_path:
+		if output_path.suffix.lower()[1:] == 'csv':
+			geodataframe_to_csv(gdf, output_path, insert_before=True, index=False)
+		else:
+			await asyncio.to_thread(gdf.to_file, output_path)
 
 
 if __name__ == '__main__':
