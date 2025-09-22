@@ -279,7 +279,7 @@ async def load_points_async(
 	*,
 	has_header: bool | None = None,
 	keep_lnglat_cols: bool = False,
-):
+) -> geopandas.GeoDataFrame:
 	"""Loads a file containing coordinates as a GeoDataFrame asynchronously, either as a DataFrame (csv/Excel/pickle/etc) containing longitude and latitude columns, or a file directly supported by geopandas"""
 	if not ext:
 		suffixes = path.suffixes

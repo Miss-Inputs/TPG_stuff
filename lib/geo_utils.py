@@ -1,17 +1,26 @@
+import logging
 from collections import defaultdict
-from collections.abc import Hashable, Iterable, Sequence
+from collections.abc import Collection, Hashable, Iterable, Sequence
 from contextlib import nullcontext
 from functools import partial
 from itertools import chain, combinations
-from typing import Any, overload
+from operator import itemgetter
+from typing import TYPE_CHECKING, Any, overload
 
 import geopandas
 import numpy
 import pandas
 import pyproj
 import shapely
+import shapely.ops
+from scipy.optimize import differential_evolution
 from tqdm.auto import tqdm
 from tqdm.contrib.concurrent import process_map
+
+if TYPE_CHECKING:
+	from shapely.geometry.base import BaseGeometry
+
+logger = logging.getLogger(__name__)
 
 geod = pyproj.Geod(ellps='WGS84')
 
@@ -103,14 +112,14 @@ def haversine_distance(
 	c = 2 * numpy.asin(numpy.sqrt(a))
 	return c * r
 
-RandomSeed = numpy.random.Generator | numpy.random.BitGenerator | numpy.random.SeedSequence | int | None
+
+RandomSeed = (
+	numpy.random.Generator | numpy.random.BitGenerator | numpy.random.SeedSequence | int | None
+)
+
 
 def random_point_in_bbox(
-	min_x: float,
-	min_y: float,
-	max_x: float,
-	max_y: float,
-	random: RandomSeed = None,
+	min_x: float, min_y: float, max_x: float, max_y: float, random: RandomSeed = None
 ) -> shapely.Point:
 	"""Uniformly generates a point somewhere in a bounding box."""
 	if not isinstance(random, numpy.random.Generator):
@@ -121,7 +130,11 @@ def random_point_in_bbox(
 
 
 def random_point_in_poly(
-	poly: shapely.Polygon | shapely.MultiPolygon, random: RandomSeed = None, *, use_tqdm: bool=False, **tqdm_kwargs
+	poly: shapely.Polygon | shapely.MultiPolygon,
+	random: RandomSeed = None,
+	*,
+	use_tqdm: bool = False,
+	**tqdm_kwargs,
 ) -> shapely.Point:
 	"""
 	Uniformly-ish generates a point somewhere within a polygon.
@@ -143,6 +156,38 @@ def random_point_in_poly(
 			point = random_point_in_bbox(min_x, max_x, min_y, max_y, random)
 			if poly.contains_properly(point):
 				return point
+
+
+def random_points_in_poly(
+	poly: shapely.Polygon | shapely.MultiPolygon,
+	n: int,
+	random: RandomSeed = None,
+	*,
+	use_tqdm: bool = False,
+	**tqdm_kwargs,
+) -> list[shapely.Point]:
+	"""
+	Uniformly-ish generates several points somewhere within a polygon.
+	This won't choose anywhere directly on the edge (I think). If poly is a MultiPolygon, it will be inside one of the components, but the distribution of which one might not necesarily be uniform.
+
+	Arguments:
+		poly: shapely Polygon or MultiPolygon
+		random: Optionally a numpy random generator or seed, otherwise default_rng is used
+	"""
+	min_x, max_x, min_y, max_y = poly.bounds
+	shapely.prepare(poly)
+	if not isinstance(random, numpy.random.Generator):
+		random = numpy.random.default_rng(random)
+	t = tqdm(**tqdm_kwargs, total=n) if use_tqdm else nullcontext()
+	points: list[shapely.Point] = []
+	with t:
+		while len(points) < n:
+			point = random_point_in_bbox(min_x, max_x, min_y, max_y, random)
+			if poly.contains_properly(point):
+				if isinstance(t, tqdm):
+					t.update(1)
+				points.append(point)
+	return points
 
 
 def circular_mean(angles: list[float] | numpy.ndarray) -> float:
@@ -288,7 +333,7 @@ def get_points_uniqueness_in_row(points: geopandas.GeoDataFrame, unique_row: Has
 		point = row.geometry
 		if not isinstance(point, shapely.Point):
 			raise TypeError(type(point))
-		others = points[points[unique_row] != points.at[index, unique_row]]
+		others = points[points[unique_row] != points.at[index, unique_row]]  # pyright: ignore[reportArgumentType]
 		distances[index], closest_indexes[index] = get_point_uniqueness(point, others.geometry)
 	return pandas.Series(distances), pandas.Series(closest_indexes)
 
@@ -309,3 +354,106 @@ def get_midpoint(point_a: shapely.Point, point_b: shapely.Point):
 	)
 	lng, lat, _ = geod.fwd(point_a.x, point_a.y, forward_azimuth, dist / 2)
 	return shapely.Point(lng, lat)
+
+
+def get_antipode(lat: float, lng: float):
+	antilat = -lat
+	antilng = lng + 180
+	if antilng > 180:
+		antilng -= 360
+	return antilat, antilng
+
+
+def get_antipodes(lats: numpy.ndarray, lngs: numpy.ndarray):
+	"""Vectorized version of get_antipode"""
+	antilat = -lats
+	antilng = lngs + 180
+	antilng[antilng > 180] -= 360
+	return antilat, antilng
+
+
+def get_closest_point(
+	target_point: shapely.Point, points: Collection[shapely.Point] | shapely.MultiPoint
+):
+	"""Finds the closest point and the distance to it in a collection of points. Uses geodetic distance. If multiple points are equally close, arbitrarily returns one of them.
+
+	Returns:
+		Point, distance in metres
+	"""
+	if isinstance(points, shapely.MultiPoint):
+		points = list(points.geoms)
+	generator = ((p, geod_distance(target_point, p)) for p in points)
+	return min(generator, key=itemgetter(1))
+
+
+def get_closest_points(
+	target_point: shapely.Point,
+	points: Sequence[shapely.Point] | shapely.MultiPoint | numpy.ndarray,
+):
+	"""Finds the closest point(s) and the distance to them in a collection of points. Uses geodetic distance.
+
+	Returns:
+		Points, distance in metres
+	"""
+	# This code kinda sucks I'm sorry
+	if isinstance(points, shapely.MultiPoint):
+		points = list(points.geoms)
+	n = len(points)
+	lngs, lats = shapely.get_coordinates(points).T
+	target_lng = [target_point.x] * n
+	target_lat = [target_point.y] * n
+	distances, _ = geod_distance_and_bearing(target_lat, target_lng, lats, lngs)
+	shortest = min(distances)
+	return [point for i, point in enumerate(points) if distances[i] == shortest], shortest
+
+
+def get_metric_crs(g: 'BaseGeometry'):
+	# It would be more ideal if we could use geopandas estimate_utm_crs, but is it worth creating a temporary GeoSeries for that…
+	point = g.representative_point()
+	return pyproj.CRS(
+		f'+proj=aeqd +lat_0={point.y} +lon_0={point.x} +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs'
+	)
+
+
+def get_centroid(g: 'BaseGeometry', crs: Any = None):
+	"""Gets the centroid of some points in WGS84 properly, accounting for projection by converting to a different CRS instead"""
+	if not crs:
+		crs = get_metric_crs(g)
+	transformer = pyproj.Transformer.from_crs('WGS84', crs, always_xy=True)
+	projected = shapely.ops.transform(transformer.transform, g)
+	centroid = projected.centroid
+	return shapely.ops.transform(partial(transformer.transform, direction='inverse'), centroid)
+
+
+def _maximin_objective(x: numpy.ndarray, points: Collection[shapely.Point]):
+	point = shapely.Point(x)
+	return -min(geod_distance(point, p) for p in points)
+
+
+def find_furthest_point_via_optimization(
+	points: Collection[shapely.Point], initial: shapely.Point | None = None, max_iter: int = 10_000
+):
+	bounds = ((-180, 180), (-90, 90))
+	popsize = 50  # should probably be an argument
+	with tqdm(desc='Differentially evolving', total=(max_iter + 1) * popsize * 2) as t:
+		# total should be actually (max_iter + 1) * popsize * 2 but eh I'll fiddle with that later
+		def callback(*_):
+			# If you just pass t.update to the callback= argument it'll just stop since t.update() returns True yippeeeee
+			t.update()
+
+		result = differential_evolution(
+			_maximin_objective,
+			bounds,
+			popsize=popsize,
+			args=(points,),
+			x0=numpy.asarray([initial.x, initial.y]) if initial else None,
+			maxiter=max_iter,
+			tol=1e-7,  # should probably be a argument
+			callback=callback,
+		)
+
+	point = shapely.Point(result.x)
+	distance = -result.fun
+	if not result.success:
+		logger.info(result.message)
+	return point, distance

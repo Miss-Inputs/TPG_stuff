@@ -10,6 +10,7 @@ pyzstd
 rasterio
 requests
 scikit-learn #not using it yet whoops
+scipy
 shapely
 tqdm
 xlsxwriter
