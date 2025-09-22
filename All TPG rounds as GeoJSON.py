@@ -16,7 +16,7 @@ async def main() -> None:
 	rounds = [r.model_dump() for r in await get_rounds()]
 	df = pandas.DataFrame(rounds)
 	df = df.sort_values('number')
-	print(df)
+
 	geom = geopandas.points_from_xy(df['longitude'], df['latitude'], crs='wgs84')
 	gdf = geopandas.GeoDataFrame(df.drop(columns=['latitude', 'longitude']), geometry=geom)
 	print(gdf)

@@ -39,8 +39,7 @@ def get_num_visitors_by_region(
 ):
 	regions = regions[[name_col, 'geometry']]
 	submissions = submissions.sjoin(regions, how='right')
-	print(submissions)
-	return submissions.groupby(name_col, sort=False).apply(_unique, include_groups=False)
+	return submissions.groupby(name_col, sort=False)[['name', 'geometry']].apply(_unique)
 
 
 def plot_visitors(visitors: geopandas.GeoDataFrame, output_path: Path | None):
@@ -57,7 +56,7 @@ def plot_visitors(visitors: geopandas.GeoDataFrame, output_path: Path | None):
 
 
 def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path', type=Path, help='Path to KML/KMZ file from the submission tracker', nargs='+'
 	)

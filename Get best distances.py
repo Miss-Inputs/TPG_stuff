@@ -41,7 +41,7 @@ def get_best_pic(
 
 
 async def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path1', type=Path)
 	argparser.add_argument('path2', type=Path)
 	argparser.add_argument('out_path', type=Path, nargs='?')

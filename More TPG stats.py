@@ -17,7 +17,7 @@ async def main() -> None:
 	all_rows = await read_dataframe_pickle_async(all_rows_path)
 	print(all_rows)
 
-	#I didn't really check if any display names are actually non-unique or otherwise not 1:1 with username, oh well
+	# I didn't really check if any display names are actually non-unique or otherwise not 1:1 with username, oh well
 	unique_pics_count = all_rows[all_rows['first_use']].groupby(['name', 'username']).size()
 	print(
 		'Players with 25 unique photos:',
@@ -25,24 +25,28 @@ async def main() -> None:
 	)
 
 	# Closest player to exactly 50% average placement
-	player_average_placement = all_rows.groupby(['name', 'username']).apply(lambda group: group['place_percent'].mean(), include_groups=False)
+	player_average_placement = all_rows.groupby(['name', 'username'])['place_percent'].mean()
 	best_average, best_average_player = player_average_placement.agg(['min', 'idxmin'])
-	print(f'Highest average: {best_average_player} (top {best_average:%} of all players)') #We aren't looking for that though, just printing that because I can
+	print(
+		f'Highest average: {best_average_player} (top {best_average:%} of all players)'
+	)  # We aren't looking for that though, just printing that because I can
 	distance_to_50 = (player_average_placement - 0.5).abs()
 	most_average = distance_to_50.idxmin()
-	print(f'Most average player: {most_average} (top {player_average_placement.loc[most_average]:%} of all players)')
+	print(
+		f'Most average player: {most_average} (top {player_average_placement.loc[most_average]:%} of all players)'
+	)
 
 	# Player with the highest count of submitted countries (hmm, be careful with unknowns)
-	player_country_count = all_rows.groupby(['name', 'username']).apply(
-		lambda group: group['cc'].nunique(dropna=True), include_groups=False
+	player_country_count = all_rows.groupby(['name', 'username'])['cc'].apply(
+		lambda group: group.nunique(dropna=True)
 	)
 	max_country_count = player_country_count.max()
 	for name, _ in player_country_count[player_country_count == max_country_count].index:
 		print(
 			f'{name} has been to at least {max_country_count} countries (not counting anything not identifiable as any country)'
 		)
-	player_maybe_country_count = all_rows.groupby(['name', 'username']).apply(
-		lambda group: group['cc'].nunique(dropna=False), include_groups=False
+	player_maybe_country_count = all_rows.groupby(['name', 'username'])['cc'].apply(
+		lambda group: group.nunique(dropna=False)
 	)
 	max_maybe_country_count = player_maybe_country_count.max()
 	for name, _ in player_maybe_country_count[

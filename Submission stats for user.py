@@ -37,7 +37,7 @@ async def print_theoretical_best_user_rounds(
 
 async def main() -> None:
 	if 'debugpy' in sys.modules:
-		username = 'miss_inputs'
+		username = 'Miss Inputs 🐈'
 		settings = Settings()
 	else:
 		argparser = ArgumentParser()

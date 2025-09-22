@@ -119,7 +119,7 @@ async def main() -> None:
 	print(df[df['round'] == df['round'].max()].index.size, 'submissions for latest round')
 	df = (
 		df.groupby(['latitude', 'longitude'])
-		.apply(_group_rounds, include_groups=False)
+		.apply(_group_rounds, include_groups=False) # pyright: ignore[reportCallIssue]
 		.reset_index()
 	)
 	print(df)

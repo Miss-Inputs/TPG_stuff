@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
+import asyncio
 import itertools
+import logging
 
 import numpy
 import pandas
+from aiohttp import ClientSession
 from tqdm.auto import tqdm
 from tqdm.contrib.concurrent import process_map
 
 from lib.geo_utils import haversine_distance
 from lib.io_utils import format_path, latest_file_matching_format_pattern, read_dataframe_pickle
-from lib.tastycheese_map import get_tpg_rounds
+from lib.tpg_api import get_rounds
 from lib.tpg_utils import tpg_score
 from settings import Settings
 
@@ -63,16 +66,14 @@ def _get_new_round_rows(
 	return rows
 
 
-def get_theoretical_best_submissions(submissions: pandas.DataFrame):
-	submissions['username'] = submissions['username'].combine_first(submissions['name'])
-
-	rounds = {r.number: (r.country, r.latitude, r.longitude) for r in get_tpg_rounds()}
+async def get_theoretical_best_submissions(submissions: pandas.DataFrame, session: ClientSession):
+	rounds = {r.number: (r.country, r.latitude, r.longitude) for r in await get_rounds(session)}
 	submissions['country'], submissions['target_lat'], submissions['target_lng'] = zip(
 		*submissions['round'].apply(lambda round_num: rounds[int(round_num)]), strict=True
 	)
 	pics_per_user = {
 		username: group[['latitude', 'longitude']].drop_duplicates()
-		for username, group in submissions.groupby('username', sort=False)
+		for username, group in submissions.groupby('name', sort=False)
 	}
 
 	rows = list(
@@ -95,7 +96,7 @@ def get_theoretical_best_submissions(submissions: pandas.DataFrame):
 	return pandas.DataFrame(rows)
 
 
-def main() -> None:
+async def main() -> None:
 	settings = Settings()
 	if not settings.submissions_path:
 		raise RuntimeError('Need submissions_path, run All TPG submissions.py first')
@@ -103,7 +104,9 @@ def main() -> None:
 	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.pickle'))
 	submissions = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
 
-	new_subs = get_theoretical_best_submissions(submissions)
+	async with ClientSession() as sesh:
+		# TODO: This should be refactored to take arguments, so you have any arbitrary set of rounds instead
+		new_subs = await get_theoretical_best_submissions(submissions, sesh)
 
 	for _, round_group in new_subs.groupby('round', as_index=False, sort=False, group_keys=False):
 		round_scores = tpg_score(round_group['distance'] / 1000)
@@ -116,7 +119,7 @@ def main() -> None:
 		round_results['total_subs'] = round_group.index.size
 		new_subs.update(round_results)
 	new_subs = new_subs.astype({'place': int, 'total_subs': int})
-	orig_placement = {(row.round, row.username): row.place for row in submissions.itertuples()}
+	orig_placement = {(row.round, row.name): row.place for row in submissions.itertuples()}
 	new_subs['orig_placement'] = new_subs.apply(
 		lambda row: orig_placement.get((row['round'], row['username'])),  # type: ignore[overload] #what? Are you stupid
 		axis='columns',
@@ -128,4 +131,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-	main()
+	logging.basicConfig(level=logging.INFO)
+	asyncio.run(main())

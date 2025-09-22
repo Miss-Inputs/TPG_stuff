@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Simple script to get a convex hull, for visualizing the general area that your pics have"""
+"""Generate some stats for all the locations from a file. May need a better name.
+
+Note that this is extremely under construction."""
 
 import asyncio
 from argparse import ArgumentParser
 from pathlib import Path
 
-import pyproj
+import geopandas
 import shapely
-from geopandas import GeoSeries
 
-from lib.format_utils import format_area, format_distance
+from lib.format_utils import format_distance, format_point
+from lib.geo_utils import find_furthest_point_via_optimization, get_antipodes, get_centroid
 from lib.io_utils import load_points_async
 
 
@@ -20,7 +22,6 @@ async def main() -> None:
 		type=Path,
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
 	)
-	argparser.add_argument('output_path', type=Path, help='Path to write a file with the results')
 
 	argparser.add_argument(
 		'--lat-column',
@@ -42,7 +43,6 @@ async def main() -> None:
 	argparser.add_argument(
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
-	argparser.add_argument('--convex', action='store_true', help='Create a convex hull instead (simpler computation, probably less useful/interesting)')
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(
@@ -52,18 +52,24 @@ async def main() -> None:
 		crs=args.crs,
 		has_header=False if args.unheadered else None,
 	)
-	union = gdf.union_all()
-	hull = shapely.convex_hull(union) if args.convex else shapely.concave_hull(union)
-	s = GeoSeries([hull], crs=gdf.crs)
-	await asyncio.to_thread(s.to_file, args.output_path)
 
-	if s.crs and not s.crs.equals('wgs84'):
-		s = s.to_crs('wgs84')
-		hull = s.geometry[0]
-	geod = pyproj.Geod(ellps='WGS84')
-	area, perimeter = geod.geometry_area_perimeter(hull)
-	print(f'Area: {format_area(abs(area))}')
-	print(f'Perimeter: {format_distance(perimeter)}')
+	geo = gdf.geometry
+	# For now this is just trying to find the furthest possible point. If you are reading this, I got impatient and committed and pushed this too early
+	points = [g for g in geo if isinstance(g, shapely.Point)]
+
+	x = geo.x.to_numpy()
+	y = geo.y.to_numpy()
+
+	antipode_lat, antipode_lng = get_antipodes(y, x)
+	antipoints = shapely.points(antipode_lng, antipode_lat)
+	assert not isinstance(antipoints, shapely.Point)
+	antipoints_mp = shapely.MultiPoint(antipoints)
+	antihull = shapely.concave_hull(antipoints_mp)
+	assert isinstance(antihull, shapely.Polygon)
+	geopandas.GeoSeries([antihull], crs='wgs84').to_file('/tmp/antihull.geojson')
+
+	point, dist = find_furthest_point_via_optimization(points, get_centroid(antihull))
+	print(format_point(point), format_distance(dist))
 
 
 if __name__ == '__main__':

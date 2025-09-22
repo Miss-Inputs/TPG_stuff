@@ -243,7 +243,7 @@ async def output_season(season: Season, path: Path, *, detailed_stats: bool = Fa
 
 
 async def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path', type=Path, help='Path to CSV/KML file', nargs='+')
 	argparser.add_argument(
 		'--world-distance',
