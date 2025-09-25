@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
 from travelpygame.scoring import tpg_score
+from travelpygame.tpg_api import get_rounds
 from travelpygame.util import read_dataframe_pickle
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 from lib.io_utils import format_path, latest_file_matching_format_pattern
-from lib.tastycheese_map import get_tpg_rounds
 from settings import Settings
 
 if TYPE_CHECKING:
 	import pandas
 
 
-def add_scores(submissions: 'pandas.DataFrame'):
-	rounds = {r.number: (r.country, r.latitude, r.longitude) for r in get_tpg_rounds()}
+def add_scores(rounds: dict[int, tuple[str | None, float, float]], submissions: 'pandas.DataFrame'):
 	submissions['country'], submissions['target_lat'], submissions['target_lng'] = zip(
 		*submissions['round'].apply(lambda round_num: rounds[int(round_num)]), strict=True
 	)
@@ -36,21 +37,20 @@ def add_scores(submissions: 'pandas.DataFrame'):
 
 	# should this use apply/agg? Ah well
 	submissions['score'] = [None] * submissions.index.size
-	for round_num, round_group in tqdm(
+	for _, round_group in tqdm(
 		submissions.groupby('round', as_index=False, sort=False, group_keys=False),
 		'Calculating scores for each round',
 	):
 		round_scores = tpg_score(round_group['distance'] / 1000)
 		round_scores.name = 'score'
 		submissions.update(round_scores)
-		if round_group['place'].hasnans:
-			tqdm.write(f'Need to recalculate places for round {round_num}')
-			ranks = round_scores.rank(method='min', ascending=False)
-			ranks.name = 'place'
-			submissions.update(ranks)
+		
+		ranks = round_scores.rank(method='min', ascending=False)
+		ranks.name = 'place'
+		submissions.update(ranks)
 
 
-def main() -> None:
+async def main() -> None:
 	settings = Settings()
 	if not settings.submissions_path:
 		raise RuntimeError('Need submissions_path, run All TPG submissions.py first')
@@ -58,7 +58,8 @@ def main() -> None:
 	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.pickle'))
 	submissions = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
 
-	add_scores(submissions)
+	rounds = {r.number: (r.country, r.latitude, r.longitude) for r in await get_rounds()}
+	add_scores(rounds,submissions)
 	print(submissions)
 	if settings.submissions_with_scores_path:
 		output_path = format_path(settings.submissions_with_scores_path, submissions['round'].max())
@@ -66,4 +67,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-	main()
+	logging.basicConfig(level=logging.INFO)
+	asyncio.run(main())

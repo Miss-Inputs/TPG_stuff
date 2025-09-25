@@ -11,9 +11,8 @@ from tqdm.auto import tqdm
 from tqdm.contrib.concurrent import process_map
 from travelpygame.scoring import tpg_score
 from travelpygame.tpg_api import get_rounds
-from travelpygame.util import read_dataframe_pickle
+from travelpygame.util import haversine_distance, read_dataframe_pickle
 
-from lib.geo_utils import haversine_distance
 from lib.io_utils import format_path, latest_file_matching_format_pattern
 from settings import Settings
 
