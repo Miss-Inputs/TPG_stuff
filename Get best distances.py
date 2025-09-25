@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 import numpy
 from tqdm.auto import tqdm
+from travelpygame.util import find_first_matching_column, geodataframe_to_csv, load_points_async
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
-from lib.io_utils import find_first_matching_column, geodataframe_to_csv, load_points_async
 
 if TYPE_CHECKING:
 	import geopandas

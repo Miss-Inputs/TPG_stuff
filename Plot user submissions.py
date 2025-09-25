@@ -8,8 +8,8 @@ import contextily
 import geopandas
 from matplotlib import pyplot
 from shapely import LineString, Point
+from travelpygame.util import parse_submission_kml
 
-from lib.kml import parse_submission_kml
 from lib.plotting import GoogleBasemap, get_google_map_provider
 
 if TYPE_CHECKING:

@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import ClientSession
 from pydantic_settings import CliApp, CliSettingsSource
+from travelpygame.util import read_dataframe_pickle_async
 
 from lib.format_utils import print_round
-from lib.io_utils import latest_file_matching_format_pattern, read_dataframe_pickle_async
+from lib.io_utils import latest_file_matching_format_pattern
 from settings import Settings
 
 if TYPE_CHECKING:

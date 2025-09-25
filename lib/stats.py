@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from lib.geo_utils import geod_distance_and_bearing, get_poly_vertices
 
 if TYPE_CHECKING:
-	from lib.kml import SubmissionTrackerRound
+	from travelpygame.util.kml import SubmissionTrackerRound
 
 
 @dataclass
@@ -59,7 +59,7 @@ def get_round_stats(r: 'SubmissionTrackerRound', world_distance: float | None = 
 
 def get_longest_distance(poly: Polygon | MultiPolygon, *, use_tqdm: bool = True):
 	"""This is too slow and will never realistically finish, so you shouldn't use it.
-	
+
 	There must be some fancy schmancy way to do this…"""
 	vertices = get_poly_vertices(poly)
 	pairs = combinations(vertices, 2)
@@ -79,6 +79,7 @@ def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
 	antipoint = df.loc[idxmax, 'point']
 	assert isinstance(antipoint, Point), type(antipoint)
 	return antipoint, float(df.loc[idxmax, 'distance'])  # type: ignore[arg-type]
+
 
 def summarize_counter[T](counter: Counter[T]):
 	counts = pandas.Series(counter)

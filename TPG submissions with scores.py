@@ -4,11 +4,12 @@
 from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
+from travelpygame.scoring import tpg_score
+from travelpygame.util import read_dataframe_pickle
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
-from lib.io_utils import format_path, latest_file_matching_format_pattern, read_dataframe_pickle
+from lib.io_utils import format_path, latest_file_matching_format_pattern
 from lib.tastycheese_map import get_tpg_rounds
-from lib.tpg_utils import tpg_score
 from settings import Settings
 
 if TYPE_CHECKING:

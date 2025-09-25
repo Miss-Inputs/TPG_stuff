@@ -5,9 +5,10 @@ from collections.abc import Hashable
 
 import geopandas
 import pandas
+from travelpygame.util import read_geodataframe
 
 from lib.geo_utils import get_points_uniqueness
-from lib.io_utils import latest_file_matching_format_pattern, read_geodataframe
+from lib.io_utils import latest_file_matching_format_pattern
 from lib.reverse_geocode import reverse_geocode_gadm_all, reverse_geocode_gadm_country
 from settings import Settings
 

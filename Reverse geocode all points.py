@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 from aiohttp import ClientSession
 from shapely import Point
 from tqdm.auto import tqdm
+from travelpygame.util import geodataframe_to_csv, load_points_async
 
-from lib.io_utils import geodataframe_to_csv, load_points_async
 from lib.reverse_geocode import reverse_geocode_address
 
 if TYPE_CHECKING:

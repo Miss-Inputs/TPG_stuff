@@ -8,9 +8,7 @@ from pathlib import Path
 import geopandas
 import pandas
 from matplotlib import pyplot
-
-from lib.io_utils import read_geodataframe
-from lib.kml import parse_submission_kml
+from travelpygame.util import parse_submission_kml, read_geodataframe
 
 
 def get_submissions(paths: Sequence[Path]):
@@ -78,7 +76,7 @@ def main() -> None:
 
 	args = argparser.parse_args()
 	paths: list[Path] = args.path
-	
+
 	if len(paths) == 1 and paths[0].suffix[1:].lower() == 'geojson':
 		submissions = read_geodataframe(paths[0])
 	else:
@@ -90,7 +88,11 @@ def main() -> None:
 	name_col: str = args.name_col or regions.drop(columns='geometry').columns[0]
 
 	visitors_by_region = get_num_visitors_by_region(submissions, regions, name_col)
-	print(visitors_by_region[['count', 'visitors']].sort_values('count', ascending=False).to_string(max_colwidth=40))
+	print(
+		visitors_by_region[['count', 'visitors']]
+		.sort_values('count', ascending=False)
+		.to_string(max_colwidth=40)
+	)
 	if not isinstance(visitors_by_region, geopandas.GeoDataFrame):
 		raise TypeError(f'Uh oh visitors_by_region is {type(visitors_by_region)}')
 	plot_visitors(visitors_by_region, args.output_path)

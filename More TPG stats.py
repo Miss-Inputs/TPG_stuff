@@ -3,9 +3,9 @@
 import asyncio
 
 from aiohttp import ClientSession
+from travelpygame.util import read_dataframe_pickle_async
 
 from lib.format_utils import describe_coord
-from lib.io_utils import read_dataframe_pickle_async
 from settings import Settings
 
 

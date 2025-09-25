@@ -7,8 +7,7 @@ import pandas
 import pydantic_core
 from async_lru import alru_cache
 from pydantic import BaseModel
-
-from lib.io_utils import read_geodataframe
+from travelpygame.util import read_geodataframe
 
 if TYPE_CHECKING:
 	import geopandas

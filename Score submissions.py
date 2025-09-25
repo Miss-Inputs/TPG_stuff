@@ -12,20 +12,25 @@ from collections import defaultdict
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import geopandas
 import numpy
 import pandas
 from aiohttp import ClientSession
 from shapely import Point
+from travelpygame.scoring import custom_tpg_score
+from travelpygame.util import geodataframe_to_csv, parse_submission_kml
 
 from lib.format_utils import describe_point, format_distance
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
-from lib.io_utils import geodataframe_to_csv, read_lines_async
-from lib.kml import SubmissionTrackerRound, parse_submission_kml
+from lib.io_utils import read_lines_async
 from lib.other_utils import find_duplicates
 from lib.stats import RoundStats, get_round_stats
-from lib.tpg_utils import Medal, count_medals, custom_tpg_score
+from lib.tpg_utils import Medal, count_medals
+
+if TYPE_CHECKING:
+	from travelpygame.util.kml import SubmissionTrackerRound
 
 
 def calc_scores(
@@ -96,7 +101,7 @@ def print_submission_reminders(names: Collection[str], reminder_names: Collectio
 
 
 def _iter_scored_rounds(
-	rounds: Sequence[SubmissionTrackerRound],
+	rounds: Sequence['SubmissionTrackerRound'],
 	world_distance: float = 5000.0,
 	fivek_threshold: float = 0.1,
 	*,
@@ -149,10 +154,12 @@ class Season:
 	current_round_names: list[str]
 	"""Names of players who have submitted in the current round"""
 
+
 def _print_round_scores(gdf: geopandas.GeoDataFrame):
 	scores = gdf.copy().drop(columns='style')
 	scores['distance'] = (scores['distance'] * 1000).map(format_distance)
 	print(scores.to_string(max_colwidth=40))
+
 
 def score_kml(
 	path: Path | Sequence[Path],

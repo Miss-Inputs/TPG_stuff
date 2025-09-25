@@ -5,8 +5,9 @@ from datetime import timedelta
 from pathlib import Path
 from time import perf_counter
 
+from travelpygame.util import read_geodataframe
+
 from lib.format_utils import format_area
-from lib.io_utils import read_geodataframe
 
 
 def main() -> None:

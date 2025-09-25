@@ -9,10 +9,10 @@ from pathlib import Path
 
 import geopandas
 import shapely
+from travelpygame.util import load_points_async
 
 from lib.format_utils import format_distance, format_point
 from lib.geo_utils import find_furthest_point_via_optimization, get_antipodes, get_centroid
-from lib.io_utils import load_points_async
 
 
 async def main() -> None:

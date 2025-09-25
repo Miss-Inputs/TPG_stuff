@@ -13,4 +13,5 @@ scikit-learn #not using it yet whoops
 scipy
 shapely
 tqdm
+travelpygame @ git+https://github.com/Miss-Inputs/travelpygame@main
 xlsxwriter

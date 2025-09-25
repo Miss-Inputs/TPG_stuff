@@ -10,9 +10,9 @@ import pandas
 import pydantic_core
 from aiohttp import ClientSession
 from pydantic import TypeAdapter
+from travelpygame.tpg_api import get_all_submissions, get_players, get_rounds
 
 from lib.io_utils import format_path, latest_file_matching_format_pattern
-from lib.tpg_api import get_all_submissions, get_players, get_rounds
 from settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ async def main() -> None:
 	print(df[df['round'] == df['round'].max()].index.size, 'submissions for latest round')
 	df = (
 		df.groupby(['latitude', 'longitude'])
-		.apply(_group_rounds, include_groups=False) # pyright: ignore[reportCallIssue]
+		.apply(_group_rounds, include_groups=False)  # pyright: ignore[reportCallIssue]
 		.reset_index()
 	)
 	print(df)

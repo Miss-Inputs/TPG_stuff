@@ -8,9 +8,9 @@ from pathlib import Path
 import pyproj
 import shapely
 from geopandas import GeoSeries
+from travelpygame.util import load_points_async
 
 from lib.format_utils import format_area, format_distance
-from lib.io_utils import load_points_async
 
 
 async def main() -> None:
@@ -42,7 +42,11 @@ async def main() -> None:
 	argparser.add_argument(
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
-	argparser.add_argument('--convex', action='store_true', help='Create a convex hull instead (simpler computation, probably less useful/interesting)')
+	argparser.add_argument(
+		'--convex',
+		action='store_true',
+		help='Create a convex hull instead (simpler computation, probably less useful/interesting)',
+	)
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(

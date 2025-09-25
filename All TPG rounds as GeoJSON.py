@@ -4,9 +4,9 @@ import asyncio
 
 import geopandas
 import pandas
+from travelpygame.tpg_api import get_rounds
 
 from lib.io_utils import format_path
-from lib.tpg_api import get_rounds
 from settings import Settings
 
 

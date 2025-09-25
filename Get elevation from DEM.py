@@ -7,8 +7,7 @@ import rasterio
 import shapely
 from numpy.ma import masked
 from tqdm.auto import tqdm
-
-from lib.io_utils import geodataframe_to_csv, load_points
+from travelpygame.util import geodataframe_to_csv, load_points
 
 
 def main() -> None:
