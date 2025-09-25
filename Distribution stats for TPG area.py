@@ -5,9 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 from time import perf_counter
 
-from travelpygame.util import read_geodataframe
-
-from lib.format_utils import format_area
+from travelpygame.util import format_area, read_geodataframe
 
 
 def main() -> None:
@@ -57,6 +55,7 @@ def main() -> None:
 
 	metres_crs = args.metres_crs or gdf.estimate_utm_crs()
 	metres = gdf.to_crs(metres_crs)
+	#TODO: Use wgs84_geod to calculate area instead
 	metres['area'] = metres.area
 	total_area = metres['area'].sum()
 

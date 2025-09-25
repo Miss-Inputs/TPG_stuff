@@ -8,8 +8,7 @@ import pandas
 import shapely
 from shapely import MultiPolygon, Point, Polygon
 from tqdm.auto import tqdm
-
-from lib.geo_utils import geod_distance_and_bearing, get_poly_vertices
+from travelpygame.util import geod_distance_and_bearing, get_poly_vertices
 
 if TYPE_CHECKING:
 	from travelpygame.util.kml import SubmissionTrackerRound

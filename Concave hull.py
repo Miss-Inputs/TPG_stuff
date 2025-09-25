@@ -8,9 +8,7 @@ from pathlib import Path
 import pyproj
 import shapely
 from geopandas import GeoSeries
-from travelpygame.util import load_points_async
-
-from lib.format_utils import format_area, format_distance
+from travelpygame.util import format_area, format_distance, load_points_async
 
 
 async def main() -> None:

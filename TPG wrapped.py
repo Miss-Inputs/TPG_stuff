@@ -12,10 +12,16 @@ import geopandas
 import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
-from travelpygame.util import read_dataframe_pickle_async, read_geodataframe_async
+from travelpygame.util import (
+	circular_mean_points,
+	format_ordinal,
+	format_point,
+	read_dataframe_pickle_async,
+	read_geodataframe_async,
+)
 
-from lib.format_utils import country_name_to_code, describe_row, format_ordinal, format_point
-from lib.geo_utils import circular_mean_points, get_points_uniqueness_in_row
+from lib.format_utils import country_name_to_code, describe_row
+from lib.geo_utils import get_points_uniqueness_in_row
 from lib.io_utils import latest_file_matching_format_pattern
 from lib.reverse_geocode import (
 	reverse_geocode_address,

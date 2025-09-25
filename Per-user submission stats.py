@@ -6,15 +6,15 @@ import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-
-from lib.format_utils import format_point
-from lib.geo_utils import (
+from travelpygame.util import (
 	circular_mean_points,
-	find_furthest_point_via_optimization,
-	geod,
+	format_point,
 	geod_distance,
 	get_centroid,
+	wgs84_geod,
 )
+
+from lib.geo_utils import find_furthest_point_via_optimization
 from lib.io_utils import latest_file_matching_format_pattern
 from settings import Settings
 
@@ -29,7 +29,7 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 		distance = geod_distance(point_1, point_2)
 		return None, distance, distance
 	hull = shapely.concave_hull(all_points, allow_holes=True)
-	area, perimeter = geod.geometry_area_perimeter(hull)
+	area, perimeter = wgs84_geod.geometry_area_perimeter(hull)
 	area = abs(area)
 
 	return hull, area, perimeter

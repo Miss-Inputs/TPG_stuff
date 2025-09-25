@@ -11,10 +11,9 @@ import geopandas
 import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
-from travelpygame.util import geodataframe_to_csv, load_points_async
+from travelpygame.util import format_point, geodataframe_to_csv, get_midpoint, load_points_async
 
-from lib.format_utils import describe_point, format_point
-from lib.geo_utils import get_midpoint
+from lib.format_utils import describe_point
 
 
 async def get_row_midpoint(

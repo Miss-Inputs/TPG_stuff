@@ -5,9 +5,8 @@ from pathlib import Path
 import pyproj
 import shapely
 from shapely import MultiPolygon, Polygon, ops
-from travelpygame.util import read_geodataframe
+from travelpygame.util import format_area, format_distance, format_point, read_geodataframe
 
-from lib.format_utils import format_area, format_distance, format_point
 from lib.stats import get_longest_distance
 
 

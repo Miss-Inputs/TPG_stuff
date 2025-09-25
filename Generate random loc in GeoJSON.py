@@ -13,10 +13,10 @@ from numpy.random import default_rng
 from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Point, Polygon
-from travelpygame.util import read_geodataframe_async
+from travelpygame.random_points import random_point_in_poly
+from travelpygame.util import format_distance, format_point, read_geodataframe_async
 
-from lib.format_utils import describe_point, format_distance, format_point
-from lib.geo_utils import random_point_in_poly
+from lib.format_utils import describe_point
 from lib.stats import get_longest_distance_from_point, summarize_counter
 
 if TYPE_CHECKING:
