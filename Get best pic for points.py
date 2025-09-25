@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Find the best pic for each point in a given set of points, so you can use it to predict how well you might do in a particular TPG"""
+"""Find the best pic for each point in a given set of points, so you can use it to predict how well you might do in a particular TPG, for example."""
 
-import asyncio
+import logging
 from argparse import ArgumentParser
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy
+from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame.util import find_first_matching_column, geodataframe_to_csv, load_points_async
+from travelpygame.util import (
+	find_first_matching_column,
+	format_distance,
+	format_point,
+	geodataframe_to_csv,
+	load_points,
+)
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 
@@ -21,7 +28,7 @@ if TYPE_CHECKING:
 def get_best_pic(
 	dest_row: 'pandas.Series',
 	sources: 'geopandas.GeoDataFrame',
-	source_name_col: Hashable = 'name',
+	source_name_col: Hashable | None = 'name',
 	*,
 	use_haversine: bool = True,
 ):
@@ -37,20 +44,27 @@ def get_best_pic(
 	)
 	shortest = numpy.argmin(distances)
 	shortest_dist = distances[shortest]
-	return sources[source_name_col].iloc[shortest], shortest_dist
+	if source_name_col:
+		shortest_name = sources[source_name_col].iloc[shortest]
+	else:
+		shortest_point = sources.geometry[shortest]
+		assert isinstance(shortest_point, Point), type(shortest_point)
+		shortest_name = format_point(shortest_point)
+	return shortest_name, shortest_dist
 
 
-async def main() -> None:
+def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path1', type=Path)
 	argparser.add_argument('path2', type=Path)
 	argparser.add_argument('out_path', type=Path, nargs='?')
 	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
 	# TODO: Also name col arguments would be useful here, for now we assume "name" is the one we want
+	argparser.add_argument('--threshold', type=float, help='Report on how often each pic is better than this distance (in km)')
 	args = argparser.parse_args()
 
-	sources = await load_points_async(args.path1)
-	dests = await load_points_async(args.path2)
+	sources = load_points(args.path1)
+	dests = load_points(args.path2)
 	source_name_col = find_first_matching_column(sources, ('name', 'desc', 'description'))
 
 	best_pics = {}
@@ -63,12 +77,21 @@ async def main() -> None:
 	dests = dests.sort_values('distance')
 
 	print(dests)
+	counts = dests['best'].value_counts()
+	print('Number of times each pic was the best:', counts)
+	print('Average distance:', format_distance(dests['distance'].mean()))
+
 	if args.out_path:
 		if args.out_path.suffix[1:].lower() == 'csv':
-			await asyncio.to_thread(geodataframe_to_csv, dests, args.out_path, index=False)
+			geodataframe_to_csv(dests, args.out_path, index=False)
 		else:
-			await asyncio.to_thread(dests.to_file, args.out_path)
+			dests.to_file(args.out_path)
+	if args.threshold:
+		threshold: float = args.threshold * 1_000
+		counts = dests[dests['distance'] < threshold]['best'].value_counts()
+		print(f'Number of times each pic was below {format_distance(threshold)}:', counts)
 
 
 if __name__ == '__main__':
-	asyncio.run(main())
+	logging.basicConfig(level=logging.INFO)
+	main()
