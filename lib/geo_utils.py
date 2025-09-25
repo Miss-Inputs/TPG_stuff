@@ -430,12 +430,29 @@ def _maximin_objective(x: numpy.ndarray, points: Collection[shapely.Point]):
 	return -min(geod_distance(point, p) for p in points)
 
 
+def _find_furthest_point_single(points: Collection[shapely.Point]):
+	point = next(iter(points))
+	anti_lat, anti_lng = get_antipode(point.y, point.x)
+	antipode = shapely.Point(anti_lng, anti_lat)
+	# Can't be bothered remembering the _exact_ circumference of the earth, maybe I should to speed things up whoops
+	return antipode, geod_distance(point, antipode)
+
+
 def find_furthest_point_via_optimization(
-	points: Collection[shapely.Point], initial: shapely.Point | None = None, max_iter: int = 10_000
-):
+	points: Collection[shapely.Point],
+	initial: shapely.Point | None = None,
+	max_iter: int = 1_000,
+	pop_size: int = 20,
+	*,
+	use_tqdm: bool = True,
+) -> tuple[shapely.Point, float]:
+	if len(points) == 1:
+		return _find_furthest_point_single(points)
+	# TODO: Should be able to trivially speed up len(points) == 2 by getting the midpoint of the two antipodes, unless I'm wrong
 	bounds = ((-180, 180), (-90, 90))
-	popsize = 50  # should probably be an argument
-	with tqdm(desc='Differentially evolving', total=(max_iter + 1) * popsize * 2) as t:
+	with tqdm(
+		desc='Differentially evolving', total=(max_iter + 1) * pop_size * 2, disable=not use_tqdm
+	) as t:
 		# total should be actually (max_iter + 1) * popsize * 2 but eh I'll fiddle with that later
 		def callback(*_):
 			# If you just pass t.update to the callback= argument it'll just stop since t.update() returns True yippeeeee
@@ -444,10 +461,11 @@ def find_furthest_point_via_optimization(
 		result = differential_evolution(
 			_maximin_objective,
 			bounds,
-			popsize=popsize,
+			popsize=pop_size,
 			args=(points,),
 			x0=numpy.asarray([initial.x, initial.y]) if initial else None,
 			maxiter=max_iter,
+			mutation=(0.5, 2.0),
 			tol=1e-7,  # should probably be a argument
 			callback=callback,
 		)
@@ -456,4 +474,7 @@ def find_furthest_point_via_optimization(
 	distance = -result.fun
 	if not result.success:
 		logger.info(result.message)
+	if not isinstance(distance, float):
+		# Those numpy floating types are probably going to bite me in the arse later if I don't stop them propagating
+		distance = float(distance)
 	return point, distance
