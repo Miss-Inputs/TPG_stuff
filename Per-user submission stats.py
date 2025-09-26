@@ -6,6 +6,7 @@ import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
+from travelpygame import find_furthest_point_via_optimization
 from travelpygame.util import (
 	circular_mean_points,
 	format_point,
@@ -14,7 +15,6 @@ from travelpygame.util import (
 	wgs84_geod,
 )
 
-from lib.geo_utils import find_furthest_point_via_optimization
 from lib.io_utils import latest_file_matching_format_pattern
 from settings import Settings
 
