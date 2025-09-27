@@ -9,7 +9,13 @@ from typing import Any
 import pandas
 from pydantic import TypeAdapter
 from travelpygame.tpg_api import get_rounds
-from travelpygame.util import format_distance, geod_distance_and_bearing, read_geodataframe_async
+from travelpygame.util import (
+	format_distance,
+	format_xy,
+	geod_distance_and_bearing,
+	read_geodataframe_async,
+	wgs84_geod,
+)
 
 from lib.io_utils import latest_file_matching_format_pattern
 from settings import Settings
@@ -70,18 +76,24 @@ async def main() -> None:
 
 		closer = df[df['distance'] < my_dist]
 		next_highest = closer.iloc[-1]
+		diff = my_dist - next_highest['distance']
+		forward_lng, forward_lat, _ = wgs84_geod.fwd(
+			my_subs['longitude'], my_subs['latitude'], my_subs['bearing'], diff
+		)
 		rows.append(
 			{
 				'round': round_num,
+				'target': format_xy(rounds[round_num][1], rounds[round_num][0]),
 				'distance': my_dist,
 				'rival': next_highest['name'],
 				'rival_distance': next_highest['distance'],
-				'diff': my_dist - next_highest['distance'],
+				'diff': diff,
 				'bearing': my_subs['bearing'],
+				'forward': format_xy(forward_lng, forward_lat),
 			}
 		)
 	df = pandas.DataFrame(rows)
-	df = df.sort_values('diff')
+	df = df.sort_values('diff').set_index('round')
 	for col in ('distance', 'rival_distance', 'diff'):
 		df[col] = df[col].map(format_distance)
 	print(df)
