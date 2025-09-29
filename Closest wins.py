@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+"""Shows who was one place ahead of you in previous TPG rounds, and by how much. Attempts to figure out what point would be exactly as close from where you are, but that's a bit vague and doesn't always work."""
 
 import asyncio
 import logging
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from typing import Any
 
+import numpy
 import pandas
 from pydantic import TypeAdapter
 from travelpygame.tpg_api import get_rounds
@@ -13,6 +15,7 @@ from travelpygame.util import (
 	format_distance,
 	format_xy,
 	geod_distance_and_bearing,
+	haversine_distance,
 	read_geodataframe_async,
 	wgs84_geod,
 )
@@ -25,13 +28,25 @@ submission_json_adapter = TypeAdapter(dict[int, list[dict[str, Any]]])
 
 async def main() -> None:
 	if 'debugpy' in sys.modules:
-		discord_id = '152814736742809600'
+		discord_id = None
+		name = 'Miss Inputs 🐈'
+		use_haversine = True
 	else:
 		argparser = ArgumentParser(description=__doc__)
-		argparser.add_argument('--discord-id')
-		# TODO: --username, --name exclusive arguments
+		user_args = argparser.add_mutually_exclusive_group(required=True)
+		user_args.add_argument('--discord_id')
+		user_args.add_argument('--name')
+		# TODO: We should have --username too but I'd have to look up that with get_players() and I can't be bothered
+		argparser.add_argument(
+			'--haversine',
+			action=BooleanOptionalAction,
+			help='Use haversine instead of geodetic distance, defaults to true',
+			default=True,
+		)
 		args = argparser.parse_args()
 		discord_id = args.discord_id
+		use_haversine = args.haversine
+		name = args.name
 
 	settings = Settings()
 	if settings.rounds_path:
@@ -60,25 +75,37 @@ async def main() -> None:
 	rows = []
 	for round_num, subs in submissions.items():
 		df = pandas.DataFrame(subs)
-		if discord_id not in frozenset(df['discord_id']):
+		if (discord_id and discord_id not in frozenset(df['discord_id'])) or (
+			name and name not in frozenset(df['name'])
+		):
+			# We did not submit for this round, and that's okay
 			continue
 		n = len(subs)
-		target_lat = [rounds[round_num][0]] * n
-		target_lng = [rounds[round_num][1]] * n
-		df['distance'], df['bearing'] = geod_distance_and_bearing(
-			target_lat, target_lng, df['latitude'], df['longitude']
-		)
+		target_lat = numpy.repeat(rounds[round_num][0], n)
+		target_lng = numpy.repeat(rounds[round_num][1], n)
+		if use_haversine:
+			df['distance'] = haversine_distance(
+				df['latitude'].to_numpy(), df['longitude'].to_numpy(), target_lat, target_lng
+			)
+			# Just to get the bearing. I guess we should have something that calculates bearing from point A to point B while assuming the earth is spherical? Meh
+			df['geod_distance'], df['bearing'] = geod_distance_and_bearing(
+				df['latitude'], df['longitude'], target_lat, target_lng
+			)
+		else:
+			df['distance'], df['bearing'] = geod_distance_and_bearing(
+				df['latitude'], df['longitude'], target_lat, target_lng
+			)
 		df = df.sort_values('distance', ascending=True)
-		my_subs = df[df['discord_id'] == discord_id].squeeze()
-		assert isinstance(my_subs, pandas.Series)
-		my_dist = my_subs['distance']
-		assert isinstance(my_dist, float)
+		my_subs = df[df['discord_id'] == discord_id] if discord_id else df[df['name'] == name]
+		my_sub = my_subs.iloc[0]
+		my_dist = my_sub['distance']
+		assert isinstance(my_dist, float), f'my_dist is {type(my_dist)}'
 
 		closer = df[df['distance'] < my_dist]
 		next_highest = closer.iloc[-1]
 		diff = my_dist - next_highest['distance']
 		forward_lng, forward_lat, _ = wgs84_geod.fwd(
-			my_subs['longitude'], my_subs['latitude'], my_subs['bearing'], diff
+			my_sub['longitude'], my_sub['latitude'], my_sub['bearing'], diff
 		)
 		rows.append(
 			{
@@ -88,7 +115,7 @@ async def main() -> None:
 				'rival': next_highest['name'],
 				'rival_distance': next_highest['distance'],
 				'diff': diff,
-				'bearing': my_subs['bearing'],
+				'bearing': my_sub['bearing'],
 				'forward': format_xy(forward_lng, forward_lat),
 			}
 		)
