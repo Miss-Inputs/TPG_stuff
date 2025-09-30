@@ -26,28 +26,8 @@ from settings import Settings
 submission_json_adapter = TypeAdapter(dict[int, list[dict[str, Any]]])
 
 
-async def main() -> None:
-	if 'debugpy' in sys.modules:
-		discord_id = None
-		name = 'Miss Inputs 🐈'
-		use_haversine = True
-	else:
-		argparser = ArgumentParser(description=__doc__)
-		user_args = argparser.add_mutually_exclusive_group(required=True)
-		user_args.add_argument('--discord_id')
-		user_args.add_argument('--name')
-		# TODO: We should have --username too but I'd have to look up that with get_players() and I can't be bothered
-		argparser.add_argument(
-			'--haversine',
-			action=BooleanOptionalAction,
-			help='Use haversine instead of geodetic distance, defaults to true',
-			default=True,
-		)
-		args = argparser.parse_args()
-		discord_id = args.discord_id
-		use_haversine = args.haversine
-		name = args.name
-
+async def get_rounds_and_subs():
+	"""This will yield DataFrames for now because I haven't invented a generic way of representing either main TPG submissions (from API) or spinoff submissions (from tracker)"""
 	settings = Settings()
 	if settings.rounds_path:
 		rounds_path = await asyncio.to_thread(
@@ -72,17 +52,44 @@ async def main() -> None:
 	if not isinstance(submissions, dict):
 		raise TypeError('Whoops, submissions json was not a dict')
 
-	rows = []
 	for round_num, subs in submissions.items():
 		df = pandas.DataFrame(subs)
+		lat, lng = rounds[round_num]
+		yield round_num, lat, lng, df
+
+
+async def main() -> None:
+	if 'debugpy' in sys.modules:
+		discord_id = None
+		name = 'Miss Inputs 🐈'
+		use_haversine = True
+	else:
+		argparser = ArgumentParser(description=__doc__)
+		user_args = argparser.add_mutually_exclusive_group(required=True)
+		user_args.add_argument('--discord_id')
+		user_args.add_argument('--name')
+		# TODO: We should have --username too but I'd have to look up that with get_players() and I can't be bothered
+		argparser.add_argument(
+			'--haversine',
+			action=BooleanOptionalAction,
+			help='Use haversine instead of geodetic distance, defaults to true',
+			default=True,
+		)
+		args = argparser.parse_args()
+		discord_id = args.discord_id
+		use_haversine = args.haversine
+		name = args.name
+
+	rows = []
+	async for round_num, lat, lng, df in get_rounds_and_subs():
 		if (discord_id and discord_id not in frozenset(df['discord_id'])) or (
 			name and name not in frozenset(df['name'])
 		):
 			# We did not submit for this round, and that's okay
 			continue
-		n = len(subs)
-		target_lat = numpy.repeat(rounds[round_num][0], n)
-		target_lng = numpy.repeat(rounds[round_num][1], n)
+		n = df.index.size
+		target_lat = numpy.repeat(lat, n)
+		target_lng = numpy.repeat(lng, n)
 		if use_haversine:
 			df['distance'] = haversine_distance(
 				df['latitude'].to_numpy(), df['longitude'].to_numpy(), target_lat, target_lng
@@ -110,7 +117,7 @@ async def main() -> None:
 		rows.append(
 			{
 				'round': round_num,
-				'target': format_xy(rounds[round_num][1], rounds[round_num][0]),
+				'target': format_xy(lng, lat),
 				'distance': my_dist,
 				'rival': next_highest['name'],
 				'rival_distance': next_highest['distance'],
