@@ -2,7 +2,7 @@
 """Find the best pic for each point in a given set of points, so you can use it to predict how well you might do in a particular TPG, for example."""
 
 import logging
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -48,29 +48,51 @@ def get_best_pic(
 		shortest_name = sources[source_name_col].iloc[shortest]
 	else:
 		shortest_point = sources.geometry[shortest]
-		assert isinstance(shortest_point, Point), type(shortest_point)
+		assert isinstance(shortest_point, Point), (
+			f'shortest_point was {type(shortest_point)}, expected Point'
+		)
 		shortest_name = format_point(shortest_point)
 	return shortest_name, shortest_dist
 
 
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
-	argparser.add_argument('path1', type=Path)
-	argparser.add_argument('path2', type=Path)
-	argparser.add_argument('out_path', type=Path, nargs='?')
+	argparser.add_argument(
+		'points', type=Path, help='Path of file with existing points to find the best ones out of'
+	)
+	argparser.add_argument(
+		'target_points', type=Path, help='Path of file with points to find the best distances to'
+	)
+	argparser.add_argument(
+		'out_path', type=Path, nargs='?', help='Output distances/best pics to a file, optionally'
+	)
 	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
-	# TODO: Also name col arguments would be useful here, for now we assume "name" is the one we want
-	argparser.add_argument('--threshold', type=float, help='Report on how often each pic is better than this distance (in km)')
+	# TODO: Also name col arguments would be useful here
+	argparser.add_argument(
+		'--threshold',
+		type=float,
+		help='Report on how often each pic is better than this distance (in km)',
+	)
+	argparser.add_argument(
+		'--use-haversine',
+		action=BooleanOptionalAction,
+		help='Use haversine for distances, defaults to true',
+		default=True,
+	)
 	args = argparser.parse_args()
 
-	sources = load_points(args.path1)
-	dests = load_points(args.path2)
+	sources = load_points(args.points)
+	dests = load_points(args.target_points)
 	source_name_col = find_first_matching_column(sources, ('name', 'desc', 'description'))
 
 	best_pics = {}
 	distances = {}
-	for index, dest_row in tqdm(dests.iterrows(), total=dests.index.size):
-		best_pics[index], distances[index] = get_best_pic(dest_row, sources, source_name_col)
+	with tqdm(dests.iterrows(), 'Finding best pics', dests.index.size, unit='target') as t:
+		for index, dest_row in t:
+			t.set_postfix(target='index')
+			best_pics[index], distances[index] = get_best_pic(
+				dest_row, sources, source_name_col, use_haversine=args.use_haversine
+			)
 
 	dests['best'] = best_pics
 	dests['distance'] = distances
@@ -78,7 +100,8 @@ def main() -> None:
 
 	print(dests)
 	counts = dests['best'].value_counts()
-	print('Number of times each pic was the best:', counts)
+	print('Number of times each pic was the best:')
+	print(counts.to_string(header=False, name=False))
 	print('Average distance:', format_distance(dests['distance'].mean()))
 
 	if args.out_path:
