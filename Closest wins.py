@@ -5,6 +5,8 @@ import asyncio
 import logging
 import sys
 from argparse import ArgumentParser, BooleanOptionalAction
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy
@@ -16,6 +18,7 @@ from travelpygame.util import (
 	format_xy,
 	geod_distance_and_bearing,
 	haversine_distance,
+	parse_submission_kml,
 	read_geodataframe_async,
 	wgs84_geod,
 )
@@ -58,15 +61,32 @@ async def get_rounds_and_subs():
 		yield round_num, lat, lng, df
 
 
+def get_rounds_subs_from_tracker(paths: Path | Sequence[Path]):
+	tracker = parse_submission_kml(paths)
+	for rnd in tracker.rounds:
+		lat = rnd.target.y
+		lng = rnd.target.x
+		submissions = [
+			{'name': sub.name, 'latitude': sub.point.y, 'longitude': sub.point.x}
+			for sub in rnd.submissions
+		]
+		yield rnd.name, lat, lng, pandas.DataFrame(submissions)
+
+
 async def main() -> None:
 	if 'debugpy' in sys.modules:
 		discord_id = None
 		name = 'Miss Inputs 🐈'
 		use_haversine = True
+		tracker_path = None
+		project_forward = True
 	else:
 		argparser = ArgumentParser(description=__doc__)
 		user_args = argparser.add_mutually_exclusive_group(required=True)
-		user_args.add_argument('--discord_id')
+		user_args.add_argument(
+			'--discord_id',
+			help='Discord ID if using main TPG, otherwise this argument is not allowed',
+		)
 		user_args.add_argument('--name')
 		# TODO: We should have --username too but I'd have to look up that with get_players() and I can't be bothered
 		argparser.add_argument(
@@ -75,13 +95,32 @@ async def main() -> None:
 			help='Use haversine instead of geodetic distance, defaults to true',
 			default=True,
 		)
+		argparser.add_argument(
+			'--project-forward',
+			action=BooleanOptionalAction,
+			help='Find the point forward from your pic towards the target that gets as close as your rival (so you would have gone up one place if you had anywhere more forward than that), defaults to false',
+			default=False,
+		)
+		argparser.add_argument(
+			'--submission-tracker',
+			type=Path,
+			nargs='*',
+			help='Path to submission tracker KMZ/KML file(s) to use that instead',
+		)
 		args = argparser.parse_args()
 		discord_id = args.discord_id
 		use_haversine = args.haversine
+		project_forward = args.project_forward
 		name = args.name
+		tracker_path = args.submission_tracker
 
 	rows = []
-	async for round_num, lat, lng, df in get_rounds_and_subs():
+	rounds_and_subs = (
+		get_rounds_subs_from_tracker(tracker_path)
+		if tracker_path
+		else [a async for a in get_rounds_and_subs()]
+	)
+	for round_num, lat, lng, df in rounds_and_subs:
 		if (discord_id and discord_id not in frozenset(df['discord_id'])) or (
 			name and name not in frozenset(df['name'])
 		):
@@ -94,10 +133,11 @@ async def main() -> None:
 			df['distance'] = haversine_distance(
 				df['latitude'].to_numpy(), df['longitude'].to_numpy(), target_lat, target_lng
 			)
-			# Just to get the bearing. I guess we should have something that calculates bearing from point A to point B while assuming the earth is spherical? Meh
-			df['geod_distance'], df['bearing'] = geod_distance_and_bearing(
-				df['latitude'], df['longitude'], target_lat, target_lng
-			)
+			if project_forward:
+				# Just to get the bearing. I guess we should have something that calculates bearing from point A to point B while assuming the earth is spherical, for consistency? Meh
+				df['geod_distance'], df['bearing'] = geod_distance_and_bearing(
+					df['latitude'], df['longitude'], target_lat, target_lng
+				)
 		else:
 			df['distance'], df['bearing'] = geod_distance_and_bearing(
 				df['latitude'], df['longitude'], target_lat, target_lng
@@ -109,23 +149,26 @@ async def main() -> None:
 		assert isinstance(my_dist, float), f'my_dist is {type(my_dist)}'
 
 		closer = df[df['distance'] < my_dist]
+		if closer.empty:
+			# We won! Obviously, that's okay
+			continue
 		next_highest = closer.iloc[-1]
 		diff = my_dist - next_highest['distance']
-		forward_lng, forward_lat, _ = wgs84_geod.fwd(
-			my_sub['longitude'], my_sub['latitude'], my_sub['bearing'], diff
-		)
-		rows.append(
-			{
-				'round': round_num,
-				'target': format_xy(lng, lat),
-				'distance': my_dist,
-				'rival': next_highest['name'],
-				'rival_distance': next_highest['distance'],
-				'diff': diff,
-				'bearing': my_sub['bearing'],
-				'forward': format_xy(forward_lng, forward_lat),
-			}
-		)
+		row = {
+			'round': round_num,
+			'target': format_xy(lng, lat),
+			'distance': my_dist,
+			'rival': next_highest['name'],
+			'rival_distance': next_highest['distance'],
+			'diff': diff,
+		}
+		if project_forward:
+			forward_lng, forward_lat, _ = wgs84_geod.fwd(
+				my_sub['longitude'], my_sub['latitude'], my_sub['bearing'], diff
+			)
+			row['bearing'] = my_sub['bearing']
+			row['forward'] = format_xy(forward_lng, forward_lat)
+		rows.append(row)
 	df = pandas.DataFrame(rows)
 	df = df.sort_values('diff').set_index('round')
 	for col in ('distance', 'rival_distance', 'diff'):
