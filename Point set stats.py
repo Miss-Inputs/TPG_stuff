@@ -10,9 +10,10 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pandas
 import shapely
 from aiohttp import ClientSession
-from travelpygame import find_furthest_point, load_points_async
+from travelpygame import find_furthest_point, get_uniqueness, load_points_async
 from travelpygame.util import (
 	circular_mean_points,
 	format_distance,
@@ -80,6 +81,8 @@ async def main() -> None:
 	argparser.add_argument(
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
+	
+	argparser.add_argument('--uniqueness-path', type=Path, help='Optionally output uniqueness of each pic to here')
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(
@@ -107,6 +110,14 @@ async def main() -> None:
 	async with ClientSession() as sesh:
 		await print_average_points(geo, sesh)
 		await print_furthest_point(points, get_centroid(antipoints_mp), sesh)
+
+	closest, uniqueness_ = get_uniqueness(geo)
+	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
+	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
+	if args.uniqueness_path:
+		await asyncio.to_thread(uniqueness.to_csv, args.uniqueness_path)
+	uniqueness['uniqueness'] = uniqueness['uniqueness'].map(format_distance)
+	print(uniqueness)
 
 
 if __name__ == '__main__':
