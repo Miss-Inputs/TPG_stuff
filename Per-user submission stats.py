@@ -6,7 +6,7 @@ import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from travelpygame import find_furthest_point_via_optimization
+from travelpygame import find_furthest_point
 from travelpygame.util import (
 	circular_mean_points,
 	format_point,
@@ -50,7 +50,7 @@ def stats_for_each_user(submissions: geopandas.GeoDataFrame):
 			all_points = geo.to_numpy()
 			all_points_mp = shapely.MultiPoint(all_points)
 			hull = concave_hull_of_user(all_points_mp)
-			furthest_point, furthest_distance = find_furthest_point_via_optimization(
+			furthest_point, furthest_distance = find_furthest_point(
 				all_points, max_iter=1000, use_tqdm=False
 			)
 			stats = {

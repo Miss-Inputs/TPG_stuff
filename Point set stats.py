@@ -4,13 +4,52 @@
 Note that this is extremely under construction."""
 
 import asyncio
+import logging
 from argparse import ArgumentParser
+from collections.abc import Collection
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import geopandas
 import shapely
-from travelpygame import find_furthest_point_via_optimization, load_points_async
-from travelpygame.util import format_distance, format_point, get_antipodes, get_centroid
+from aiohttp import ClientSession
+from travelpygame import find_furthest_point, load_points_async
+from travelpygame.util import (
+	circular_mean_points,
+	format_distance,
+	get_centroid,
+	get_closest_point_index,
+	get_point_antipodes,
+	try_set_index_name_col,
+)
+
+from lib.format_utils import describe_point
+
+if TYPE_CHECKING:
+	from geopandas import GeoSeries
+
+logger = logging.getLogger(__name__)
+
+
+async def print_furthest_point(
+	points: Collection[shapely.Point], initial: shapely.Point, session: ClientSession
+):
+	furthest_point, dist = find_furthest_point(points, initial)
+	desc = await describe_point(furthest_point, session, include_coords=True)
+	print(f'Furthest point: {desc}, {format_distance(dist)} away')
+
+
+async def print_average_points(geo: 'GeoSeries', session: ClientSession):
+	points = geo.to_numpy()
+	circ = circular_mean_points(points)
+	print('Circular mean point:', await describe_point(circ, session, include_coords=True))
+	closest_index, dist = get_closest_point_index(circ, points)
+	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
+
+	mp = shapely.MultiPoint(points)
+	centroid = get_centroid(mp)
+	print('Centroid of all points:', await describe_point(centroid, session, include_coords=True))
+	closest_index, dist = get_closest_point_index(centroid, points)
+	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
 
 
 async def main() -> None:
@@ -50,25 +89,26 @@ async def main() -> None:
 		crs=args.crs,
 		has_header=False if args.unheadered else None,
 	)
+	assert gdf.crs, 'gdf had no crs, which should never happen'
+	if not gdf.crs.is_geographic:
+		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
+		gdf = gdf.to_crs('wgs84')
+
+	gdf = try_set_index_name_col(gdf)
 
 	geo = gdf.geometry
-	# For now this is just trying to find the furthest possible point. If you are reading this, I got impatient and committed and pushed this too early
 	points = [g for g in geo if isinstance(g, shapely.Point)]
 
-	x = geo.x.to_numpy()
-	y = geo.y.to_numpy()
-
-	antipode_lat, antipode_lng = get_antipodes(y, x)
-	antipoints = shapely.points(antipode_lng, antipode_lat)
-	assert not isinstance(antipoints, shapely.Point)
+	antipoints = get_point_antipodes(geo)
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon)
-	geopandas.GeoSeries([antihull], crs='wgs84').to_file('/tmp/antihull.geojson')
 
-	point, dist = find_furthest_point_via_optimization(points, get_centroid(antihull))
-	print(format_point(point), format_distance(dist))
+	async with ClientSession() as sesh:
+		await print_average_points(geo, sesh)
+		await print_furthest_point(points, get_centroid(antipoints_mp), sesh)
 
 
 if __name__ == '__main__':
+	logging.basicConfig(level=logging.INFO)
 	asyncio.run(main())

@@ -18,18 +18,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def describe_coord(lat: float, lng: float, session: 'ClientSession') -> str:
+async def describe_coord(
+	lat: float, lng: float, session: 'ClientSession', *, include_coords: bool = False
+) -> str:
 	address = await reverse_geocode_address(lat, lng, session)
 	if not address:
 		if lat <= -60:
 			# Nominatim has trouble with Antarctica for some reason
 			return f'<Antarctica ({format_xy(lng, lat)})>'
 		return f'<Unknown ({format_xy(lng, lat)})>'
-	return address
+	return f'{format_xy(lng, lat)} {address}' if include_coords else address
 
 
-async def describe_point(p: 'Point', session: 'ClientSession') -> str:
-	return await describe_coord(p.y, p.x, session)
+async def describe_point(
+	p: 'Point', session: 'ClientSession', *, include_coords: bool = False
+) -> str:
+	return await describe_coord(p.y, p.x, session, include_coords=include_coords)
 
 
 async def describe_row(row: 'pandas.Series', session: 'ClientSession') -> str:
