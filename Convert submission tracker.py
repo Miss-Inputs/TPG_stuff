@@ -16,6 +16,7 @@ def main() -> None:
 	argparser.add_argument('path', type=Path, help='Path to KML/KMZ file', nargs='+')
 	argparser.add_argument('output_path', type=Path, help='Path to save json')
 	season_args = argparser.add_mutually_exclusive_group()
+	season_args.add_argument('--start-round', type=int, help='Number to start counting rounds from, defaults to 1', default=1)
 	season_args.add_argument('--season', type=int, help='Season number for all these rounds')
 	season_args.add_argument(
 		'--season-start',
@@ -31,7 +32,7 @@ def main() -> None:
 	season_starts: list[int] | None = args.season_start
 	output_path: Path = args.output_path
 
-	rounds = convert_submission_tracker(paths, season_starts or season)
+	rounds = convert_submission_tracker(paths, args.start_round, season_starts or season)
 	if season_starts or season:
 		for season, season_rounds in groupby(sorted(rounds, key=_season_sorter), _season_sorter):
 			season_rounds = list(season_rounds)
