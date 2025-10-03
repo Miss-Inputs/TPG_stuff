@@ -6,7 +6,6 @@ Note that this is extremely under construction."""
 import asyncio
 import logging
 from argparse import ArgumentParser
-from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,11 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 async def print_furthest_point(
-	points: Collection[shapely.Point], initial: shapely.Point, session: ClientSession
+	geo: 'GeoSeries', initial: shapely.Point, session: ClientSession
 ):
+	points = geo.to_numpy()
 	furthest_point, dist = find_furthest_point(points, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
-	print(f'Furthest point: {desc}, {format_distance(dist)} away')
+	closest_index, _ = get_closest_point_index(furthest_point, points)
+	print(f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}')
 
 
 async def print_average_points(geo: 'GeoSeries', session: ClientSession):
@@ -81,8 +82,14 @@ async def main() -> None:
 	argparser.add_argument(
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
-	
-	argparser.add_argument('--uniqueness-path', type=Path, help='Optionally output uniqueness of each pic to here')
+	argparser.add_argument(
+		'--name-col',
+		help='Force a specific column label for the name of each point, otherwise autodetect',
+	)
+
+	argparser.add_argument(
+		'--uniqueness-path', type=Path, help='Optionally output uniqueness of each pic to here'
+	)
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(
@@ -97,10 +104,9 @@ async def main() -> None:
 		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
 		gdf = gdf.to_crs('wgs84')
 
-	gdf = try_set_index_name_col(gdf)
+	gdf = gdf.set_index(args.name_col) if args.name_col else try_set_index_name_col(gdf)
 
 	geo = gdf.geometry
-	points = [g for g in geo if isinstance(g, shapely.Point)]
 
 	antipoints = get_point_antipodes(geo)
 	antipoints_mp = shapely.MultiPoint(antipoints)
@@ -109,7 +115,7 @@ async def main() -> None:
 
 	async with ClientSession() as sesh:
 		await print_average_points(geo, sesh)
-		await print_furthest_point(points, get_centroid(antipoints_mp), sesh)
+		await print_furthest_point(geo, get_centroid(antipoints_mp), sesh)
 
 	closest, uniqueness_ = get_uniqueness(geo)
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
