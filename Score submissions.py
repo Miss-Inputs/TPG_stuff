@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas
 from travelpygame import (
 	Round,
+	ScoringOptions,
 	convert_submission_tracker,
 	load_rounds,
 	make_leaderboards,
@@ -57,10 +58,10 @@ def main() -> None:
 		default=True,
 	)
 	argparser.add_argument(
-		'--allow-negative',
+		'--clip-negative',
 		action=BooleanOptionalAction,
-		help='Allow negative scores for distance if greater than --world-distance km, defaults to False which gives a score of 0 for very far away submissions instead',
-		default=False,
+		help='If True (default), gives a score of 0 for submissions outside of world_distance km, otherwise lets them be negative',
+		default=True,
 	)
 	argparser.add_argument(
 		'--reminder-list',
@@ -95,21 +96,23 @@ def main() -> None:
 		rounds += loaded
 	rounds.sort(key=_round_number_getter)
 
+	options = ScoringOptions(
+		args.fivek_score, None, None, None, args.world_distance, clip_negative=args.clip_negative
+	)
+
 	scored_rounds = [
-		score_round(
-			r,
-			args.world_distance,
-			args.fivek_score,
-			args.fivek_threshold,
-			use_haversine=args.use_haversine,
-			clip_negative=not args.allow_negative,
-		)
+		score_round(r, options, args.fivek_threshold, use_haversine=args.use_haversine)
 		for r in rounds
+		if not r.is_scored
 	]
 	if output_path:
 		output_path.write_text(rounds_to_json(scored_rounds))
 
-	points, distance, medals = make_leaderboards(scored_rounds[:-1]) if args.ongoing_round else make_leaderboards(scored_rounds)
+	points, distance, medals = (
+		make_leaderboards(scored_rounds[:-1])
+		if args.ongoing_round
+		else make_leaderboards(scored_rounds)
+	)
 	print(points)
 	if output_path:
 		points.to_csv(output_path.with_name(f'{output_path.stem} - Points Leaderboard.csv'))
