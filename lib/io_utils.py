@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any
 
 
 def latest_file_matching_format_pattern(path: Path) -> Path:
@@ -11,7 +10,3 @@ def latest_file_matching_format_pattern(path: Path) -> Path:
 		return path
 	# Replacing with * seems clunky, but I don't feel like implementing glob.translate myself
 	return max(path.parent.glob(path.name.replace('{}', '*')))
-
-def format_path(path: Path, n: Any):
-	"""Replaces {} in a path stem with n."""
-	return path.with_stem(path.stem.format(n))
