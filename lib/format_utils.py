@@ -1,13 +1,12 @@
 """Dunno what else to call this"""
 
-import contextlib
 import logging
 from functools import cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pandas
 import pycountry
-from travelpygame.util.other import format_distance, format_xy
+from travelpygame.util.other import format_xy
 
 from lib.reverse_geocode import reverse_geocode_address
 
@@ -85,19 +84,3 @@ def country_name_to_code(country_name: str | None) -> str | None:
 			countries,
 		)
 	return getattr(countries[0], 'alpha_2', None)
-
-
-async def print_round(n: int, row: Any, sesh: 'ClientSession'):
-	loc_address = await reverse_geocode_address(row.target_lat, row.target_lng, sesh)
-	print(f'{n}: Round {row.round}: {row.target_lat, row.target_lng} {loc_address}')
-	sub_address = await reverse_geocode_address(row.latitude, row.longitude, sesh)
-	print(f'Submission: {row.latitude}, {row.longitude} {sub_address}')
-	print(
-		f'Distance: {format_distance(row.distance)}km Place: {row.place}/{row.total_subs} Score: {row.score}'
-	)
-	with contextlib.suppress(AttributeError):
-		print(
-			f'Geodesic distance: {format_distance(row.geod_distance)} Heading from photo to loc: {row.heading}°'
-		)
-
-	print('-' * 10)

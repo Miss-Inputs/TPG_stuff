@@ -1,55 +1,14 @@
 import logging
-from collections import defaultdict
 from collections.abc import Hashable, Sequence
-from functools import partial
-from itertools import combinations
-from typing import Any
 
 import geopandas
 import numpy
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from tqdm.contrib.concurrent import process_map
-from travelpygame.util import geod_distance, geod_distance_and_bearing, haversine_distance
+from travelpygame.util import geod_distance_and_bearing, haversine_distance
 
 logger = logging.getLogger(__name__)
-
-
-def _dist_matrix_worker(a: Any, b: Any, *, points: 'geopandas.GeoSeries'):
-	row_a = points.loc[a]
-	row_b = points.loc[b]
-	return a, b, geod_distance(row_a, row_b)
-
-
-def distance_matrix(
-	points: 'geopandas.GeoSeries', chunksize: int = 10_000, *, multiprocess: bool = True
-) -> pandas.DataFrame:
-	# I should probably use sklearn pairwise distances here but eh, didn't feel like it
-	distances = defaultdict(dict)
-	n = points.size
-
-	if multiprocess:
-		f = partial(_dist_matrix_worker, points=points)
-		index_combinations = list(combinations(points.index, 2))
-		for a, b, dist in process_map(
-			f,
-			*zip(*index_combinations, strict=True),
-			chunksize=chunksize,
-			desc='Calculating distances',
-			leave=False,
-		):
-			distances[a][b] = distances[b][a] = dist
-	else:
-		total = (n * (n - 1)) // 2
-		for a, b in tqdm(
-			combinations(points.index, 2), 'Calculating distances', total, leave=False
-		):
-			row_a = points.loc[a]
-			row_b = points.loc[b]
-			dist = geod_distance(row_a, row_b)
-			distances[a][b] = distances[b][a] = dist
-	return pandas.DataFrame(distances)
 
 
 def get_point_uniqueness(
