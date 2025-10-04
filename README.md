@@ -14,6 +14,7 @@ The phrase "TPG area" or "defined area" refers to the part of the world that rou
 ### For TPG players
 Things to help you actually play the game.
 - Get all midpoints: Intended for Team TPG, finds every possible midpoint between all of your points and a teammate's points.
+- Get point set from submissions: Gets all points submitted from a particular player, optionally using a specific TPG data file or getting main TPG data. Useful for getting your own points if you don't have a list already, a teammate's points for Team TPG, or an opponent's points for Gauntlet TPG/TPG League/TPG Tournament/etc.
 - Reverse geocode all points: Given a point set with no or incomplete name/description, uses a Nominatim mirror to find the address for each point, and optionally saves the file to .csv or .geojson or whichever else. (The reverse geocoding is not in travelpygame at this point in time.)
 
 ### For TPG players (stats)
