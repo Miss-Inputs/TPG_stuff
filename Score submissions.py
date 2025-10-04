@@ -101,9 +101,10 @@ def main() -> None:
 	)
 
 	scored_rounds = [
-		score_round(r, options, args.fivek_threshold, use_haversine=args.use_haversine)
+		r
+		if r.is_scored
+		else score_round(r, options, args.fivek_threshold, use_haversine=args.use_haversine)
 		for r in rounds
-		if not r.is_scored
 	]
 	if output_path:
 		output_path.write_text(rounds_to_json(scored_rounds))
