@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 
+import asyncio
 import logging
+from argparse import ArgumentParser
+from pathlib import Path
 
 import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from travelpygame import find_furthest_point
+from travelpygame import (
+	Round,
+	find_furthest_point,
+	get_main_tpg_rounds_with_path,
+	get_submissions_per_user,
+	load_rounds_async,
+)
 from travelpygame.util import (
 	circular_mean_points,
 	format_point,
@@ -15,7 +24,6 @@ from travelpygame.util import (
 	wgs84_geod,
 )
 
-from lib.io_utils import latest_file_matching_format_pattern
 from lib.settings import Settings
 
 
@@ -35,26 +43,24 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 	return hull, area, perimeter
 
 
-def stats_for_each_user(submissions: geopandas.GeoDataFrame):
-	grouper = submissions.groupby('name')
+def stats_for_each_user(rounds: list[Round]):
+	per_user = get_submissions_per_user(rounds)
 	data = {}
-	with tqdm(grouper, 'Calculating stats', grouper.ngroups) as t:
-		for name, group in t:
+	with tqdm(per_user.items(), 'Calculating stats', unit='player') as t:
+		for name, latlngs in t:
 			t.set_postfix(name=name)
 			# TODO: These should all be parameters whether to calculate each particular stat or not
-			geo = group.geometry
-			assert isinstance(geo, geopandas.GeoSeries), type(geo)
+			points = shapely.points([(lng, lat) for lat, lng in latlngs])
 			# crs = geo.estimate_utm_crs()
 			# Using that for get_centroid seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
-			geo = geo.drop_duplicates()
-			all_points = geo.to_numpy()
-			all_points_mp = shapely.MultiPoint(all_points)
+			all_points_mp = shapely.MultiPoint(points)
 			hull = concave_hull_of_user(all_points_mp)
 			furthest_point, furthest_distance = find_furthest_point(
-				all_points, max_iter=1000, use_tqdm=False
+				points, max_iter=1000, use_tqdm=False
 			)
 			stats = {
-				'average_point': circular_mean_points(all_points),
+				'count': len(points),
+				'average_point': circular_mean_points(points),
 				'centroid': get_centroid(all_points_mp),
 				'antipoint': furthest_point,
 				'furthest_distance': furthest_distance,
@@ -64,24 +70,31 @@ def stats_for_each_user(submissions: geopandas.GeoDataFrame):
 			}
 			data[name] = stats
 	df = pandas.DataFrame.from_dict(data, 'index')
-	df = df.merge(grouper.size().rename('count'), how='left', left_index=True, right_index=True)
 	df = df.reset_index(names='name')
 	return df.sort_values('concave_hull_area', ascending=False)
 
 
-def main() -> None:
-	settings = Settings()
-	if not settings.main_tpg_data_path:
-		raise RuntimeError('need submissions_path, run All TPG submissions.py first')
-	# TODO: This should be more generic and should be able to take some other file so it can work with spinoffs and such
-	path = latest_file_matching_format_pattern(settings.main_tpg_data_path.with_suffix('.geojson'))
+async def main() -> None:
+	argparser = ArgumentParser(description=__doc__)
+	argparser.add_argument(
+		'path',
+		nargs='?',
+		type=Path,
+		help='Path to load TPG data from, defaults to MAIN_TPG_DATA_PATH environment variable if set. If that is not set and this argument is not given, gets main TPG data.',
+	)
+	args = argparser.parse_args()
+	path: Path | None = args.path
+	if path:
+		rounds = await load_rounds_async(path)
+	else:
+		settings = Settings()
+		rounds = await get_main_tpg_rounds_with_path(settings.main_tpg_data_path)
 
-	submissions: geopandas.GeoDataFrame = geopandas.read_file(path)
-	stats = stats_for_each_user(submissions)
+	stats = stats_for_each_user(rounds)
 
 	print(stats)
 	# I should make these paths configurable but I didn't and haven't, and should
-	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].copy()
+	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values('furthest_distance')
 	antipoint_stats['antipoint'] = antipoint_stats['antipoint'].map(format_point)
 	antipoint_stats.to_csv('/tmp/antipoint_stats.csv', index=False)
 	stats.to_csv('/tmp/stats.csv', index=False)
@@ -103,4 +116,4 @@ def main() -> None:
 
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
-	main()
+	asyncio.run(main())
