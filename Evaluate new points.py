@@ -11,10 +11,10 @@ from pandas import Index, RangeIndex
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame.best_pics import get_worst_point
 from travelpygame.new_pic_eval import (
 	find_if_new_pics_better,
 	find_new_pics_better_individually,
-	get_worst_point,
 	load_points_or_rounds,
 )
 from travelpygame.util import (
@@ -31,7 +31,9 @@ def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataF
 	points_geom = points.geometry.to_numpy()
 
 	rows = []
-	with tqdm(new_points.geometry.items(), 'Calculating distances', new_points.index.size, unit='point') as t:
+	with tqdm(
+		new_points.geometry.items(), 'Calculating distances', new_points.index.size, unit='point'
+	) as t:
 		for index, new_point in t:
 			t.set_postfix(new_point=index)
 			if not isinstance(new_point, Point):
@@ -143,7 +145,12 @@ def main() -> None:
 		help='Find any instance of a point in new_points being the new closest point for anywhere in targets, has no effect if --targets is not specified. Defaults to true',
 		default=True,
 	)
-	argparser.add_argument('--use-haversine', action=BooleanOptionalAction)
+	argparser.add_argument(
+		'--use-haversine',
+		action=BooleanOptionalAction,
+		help='Use haversine for distances, defaults to true',
+		default=True,
+	)
 	argparser.add_argument('--output-path', type=Path)
 	# TODO: Option for new_points to just be one point
 	# TODO: lat/lng/blah column name options
