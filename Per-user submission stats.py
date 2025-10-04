@@ -16,7 +16,7 @@ from travelpygame.util import (
 )
 
 from lib.io_utils import latest_file_matching_format_pattern
-from settings import Settings
+from lib.settings import Settings
 
 
 def concave_hull_of_user(all_points: shapely.MultiPoint):
@@ -71,10 +71,10 @@ def stats_for_each_user(submissions: geopandas.GeoDataFrame):
 
 def main() -> None:
 	settings = Settings()
-	if not settings.submissions_path:
+	if not settings.main_tpg_data_path:
 		raise RuntimeError('need submissions_path, run All TPG submissions.py first')
 	# TODO: This should be more generic and should be able to take some other file so it can work with spinoffs and such
-	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.geojson'))
+	path = latest_file_matching_format_pattern(settings.main_tpg_data_path.with_suffix('.geojson'))
 
 	submissions: geopandas.GeoDataFrame = geopandas.read_file(path)
 	stats = stats_for_each_user(submissions)

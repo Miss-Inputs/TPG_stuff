@@ -14,7 +14,7 @@ from travelpygame.tpg_api import get_rounds
 from travelpygame.util import haversine_distance, read_dataframe_pickle
 
 from lib.io_utils import format_path, latest_file_matching_format_pattern
-from settings import Settings
+from lib.settings import Settings
 
 
 def get_best_pic(pics: pandas.DataFrame, target_lat: float, target_lng: float):
@@ -98,10 +98,10 @@ async def get_theoretical_best_submissions(submissions: pandas.DataFrame, sessio
 
 async def main() -> None:
 	settings = Settings()
-	if not settings.submissions_path:
+	if not settings.main_tpg_data_path:
 		raise RuntimeError('Need submissions_path, run All TPG submissions.py first')
 
-	path = latest_file_matching_format_pattern(settings.submissions_path.with_suffix('.pickle'))
+	path = latest_file_matching_format_pattern(settings.main_tpg_data_path.with_suffix('.pickle'))
 	submissions = read_dataframe_pickle(path, desc='Loading submissions', leave=False)
 
 	async with ClientSession() as sesh:

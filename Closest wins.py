@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy
 import pandas
-from pydantic_settings import CliApp
+from pydantic_settings import CliApp, CliSettingsSource
 from travelpygame import get_main_tpg_rounds_with_path, load_rounds_async
 from travelpygame.util import (
 	format_distance,
@@ -19,7 +19,7 @@ from travelpygame.util import (
 	wgs84_geod,
 )
 
-from settings import Settings
+from lib.settings import Settings
 
 
 async def main() -> None:
@@ -49,20 +49,21 @@ async def main() -> None:
 			help='Find the point forward from your pic towards the target that gets as close as your rival (so you would have gone up one place if you had anywhere more forward than that), defaults to false',
 			default=False,
 		)
+		settings_source = CliSettingsSource(Settings, root_parser=argparser)
+		settings = CliApp.run(Settings, cli_settings_source=settings_source)
 		args = argparser.parse_args()
 		use_haversine = args.haversine
 		project_forward = args.project_forward
 		name = args.name
 		rounds_path = args.rounds_path
 
-		#TODO: Should set this up to parse properly but eh
-		settings = CliApp.run(Settings, [])
+		# TODO: Should set this up to parse properly but eh
 
 	rows = []
 	rounds = (
 		await load_rounds_async(rounds_path)
 		if rounds_path
-		else await get_main_tpg_rounds_with_path(settings.submissions_path)
+		else await get_main_tpg_rounds_with_path(settings.main_tpg_data_path)
 	)
 	for r in rounds:
 		df = pandas.DataFrame([s.model_dump(exclude_none=True) for s in r.submissions])

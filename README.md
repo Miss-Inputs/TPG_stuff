@@ -36,6 +36,7 @@ Things to help figure out where to actually go in real life so you can have a be
 
 ### Other stats
 - Custom travel map: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
+- Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
 - Plot user submissions: Plots rounds and submissions and arrows from the submission to the round, given TPG data and a player name. NOTE: This currently needs rewriting and also hardcodes some stuff.
 
@@ -43,14 +44,11 @@ Things to help figure out where to actually go in real life so you can have a be
 - Get elevation from DEM: Given your point set, and a .tiff file or whatever representing a DEM (digital elevation model), finds the elevation of your points (where the DEM has that data). Elevation is not used in TPG except in some hypothetical spinoffs, but maybe you might like to add that as a column for funsies.
 
 ### Unsorted and may be dismantled/deleted
-- All TPG rounds as GeoJSON: This should take a .json as input
-- All TPG submissions: This should take a .json as input but could also be combined with the above
 - Concave hull: Was just here for messing around, but could be merged into point set stats if it's useful
 - Most unique submissions: Submissions that are the furthest apart from any other submissions. Needs refactoring to use the new format for TPG data, etc.
 - Submission stats for user: Prints some stats from main TPG data, but needs to use the new format for that.
 - Submission tracker to GeoJSON: Was probably just there for testing but should be using a TPG data file instead.
 - Theoretical best for each user: Re-runs each TPG round with every user's known pics, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have. Needs rewrite and currently won't work.
-- TPG submissions with scores: Calculated scores, but this isn't a thing anymore.
 
 ### One-off things which are just around if one desires to run them again
 - TPG wrapped.py: Used at the end of season 2 to generate nicely formatted stats for every player, which everyone liked.

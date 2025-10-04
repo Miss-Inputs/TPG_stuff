@@ -29,7 +29,7 @@ from lib.reverse_geocode import (
 	reverse_geocode_gadm_all,
 	reverse_geocode_gadm_country,
 )
-from settings import Settings
+from lib.settings import Settings
 
 logger = logging.getLogger(__name__)
 

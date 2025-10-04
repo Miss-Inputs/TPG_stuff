@@ -6,7 +6,7 @@ from aiohttp import ClientSession
 from travelpygame.util import read_dataframe_pickle_async
 
 from lib.format_utils import describe_coord
-from settings import Settings
+from lib.settings import Settings
 
 
 async def main() -> None:
