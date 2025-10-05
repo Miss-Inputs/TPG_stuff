@@ -59,7 +59,6 @@ Things to help figure out where to actually go in real life so you can have a be
 ### Unsorted and may be dismantled/deleted
 
 - Concave hull: Was just here for messing around, but could be merged into point set stats if it's useful
-- Most unique submissions: Submissions that are the furthest apart from any other submissions. Needs refactoring to use the new format for TPG data, etc.
 - Submission tracker to GeoJSON: Was probably just there for testing but should be using a TPG data file instead.
 
 ### One-off things which are just around if one desires to run them again
