@@ -5,8 +5,9 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections import Counter, defaultdict
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import geopandas
 import shapely.ops
 from aiohttp import ClientSession
 from numpy.random import default_rng
@@ -14,14 +15,12 @@ from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Point, Polygon
 from tqdm.auto import tqdm, trange
+from travelpygame import output_geodataframe
 from travelpygame.random_points import random_point_in_poly
 from travelpygame.util import format_distance, format_point, read_geodataframe_async
 
 from lib.format_utils import describe_point
 from lib.stats import get_longest_distance_from_point, summarize_counter
-
-if TYPE_CHECKING:
-	import geopandas
 
 
 def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: list[str]):
@@ -74,21 +73,16 @@ async def _random_points_in_poly(
 	value_cols: list[str],
 	seed: int | None,
 	*,
+	print_each_point: bool,
 	stats: bool,
-):
+) -> geopandas.GeoDataFrame:
 	random = default_rng(seed)
 	total_data: defaultdict[str, list[Any]] = defaultdict(list)
+	rows = []
 	async with ClientSession() as sesh:
 		for i in trange(1, num_points + 1, desc='Generating points', unit='point'):
 			# TODO: This should be refactored to use random_points_in_poly here instead, although without that using a vectorized implementation, it most likely does not make a difference
-			point = random_point_in_poly(
-				gdf,
-				random,
-				use_tqdm=True,
-				desc='Finding point inside poly',
-				unit='attempt',
-				leave=False,
-			)
+			point = random_point_in_poly(gdf, random, use_tqdm=False)
 			point = shapely.ops.transform(to_wgs84.transform, point)
 			if value_cols:
 				data = _get_point_data(point, gdf, value_cols)
@@ -96,15 +90,19 @@ async def _random_points_in_poly(
 				for k, v in data.items():
 					assert isinstance(k, str), type(k)
 					total_data[k].append(v)
+				rows.append({'point': point, **data.to_dict()})
 			else:
 				desc = await describe_point(point, sesh)
-			tqdm.write(f'{i}: {format_point(point)} {desc}')
+				rows.append({'point': point, 'name': desc})
+			if print_each_point:
+				tqdm.write(f'{i}: {format_point(point)} {desc}')
 	if stats:
 		for col, values in total_data.items():
 			counter = Counter(values)
 			tqdm.write(f'{col}:')
 			tqdm.write(str(summarize_counter(counter)))
 			tqdm.write('-' * 10)
+	return geopandas.GeoDataFrame(rows, geometry='point', crs=gdf.crs)
 
 
 async def main() -> None:
@@ -144,11 +142,15 @@ async def main() -> None:
 		help='Optional seed for random number generator, default none (use default entropy)',
 		dest='seed',
 	)
+	argparser.add_argument(
+		'--output-path', type=Path, help='Output generated points here, if n is more than 1'
+	)
 	args = argparser.parse_args()
 
 	path = args.path
 	n: int = args.n
 	seed: int | None = args.seed
+	output_path: Path | None = args.output_path
 	value_cols: list[str] = args.value_cols
 
 	gdf = await read_geodataframe_async(path)
@@ -174,7 +176,17 @@ async def main() -> None:
 			poly, gdf, to_wgs84, to_utm, value_cols, seed, stats=args.stats
 		)
 	else:
-		await _random_points_in_poly(n, gdf, to_wgs84, value_cols, seed, stats=args.stats)
+		points = await _random_points_in_poly(
+			n,
+			gdf,
+			to_wgs84,
+			value_cols,
+			seed,
+			print_each_point=output_path is None,
+			stats=args.stats,
+		)
+		if output_path:
+			output_geodataframe(points, output_path, index=False)
 
 
 if __name__ == '__main__':
