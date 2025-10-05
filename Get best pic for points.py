@@ -14,11 +14,11 @@ from travelpygame.util import (
 	find_first_matching_column,
 	format_distance,
 	format_point,
+	geod_distance_and_bearing,
+	haversine_distance,
 	load_points,
 	output_geodataframe,
 )
-
-from lib.geo_utils import geod_distance_and_bearing, haversine_distance
 
 if TYPE_CHECKING:
 	import geopandas

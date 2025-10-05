@@ -12,6 +12,7 @@ import geopandas
 import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
+from travelpygame.stats import get_uniqueness
 from travelpygame.util import (
 	circular_mean_points,
 	format_ordinal,
@@ -21,7 +22,6 @@ from travelpygame.util import (
 )
 
 from lib.format_utils import country_name_to_code, describe_row
-from lib.geo_utils import get_points_uniqueness_in_row
 from lib.io_utils import latest_file_matching_format_pattern
 from lib.reverse_geocode import (
 	reverse_geocode_address,
@@ -552,7 +552,7 @@ async def main() -> None:
 		geometry=geopandas.points_from_xy(submissions['longitude'], submissions['latitude']),
 		crs='wgs84',
 	)
-	uniqueness, closest = get_points_uniqueness_in_row(
+	uniqueness, closest = get_uniqueness(
 		submissions[submissions['first_use']], 'username'
 	)
 	submissions['uniqueness'] = {
