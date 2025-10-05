@@ -3,7 +3,9 @@
 
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import shapely
 from travelpygame import (
@@ -23,6 +25,9 @@ from travelpygame.simulation import (
 	simulate_existing_rounds,
 )
 from travelpygame.util import format_point, format_xy, read_geodataframe, try_set_index_name_col
+
+if TYPE_CHECKING:
+	from geopandas import GeoSeries
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -48,6 +53,7 @@ def compare_rounds(old_round: Round, new_round: Round, name: str | None):
 
 def get_simulation(
 	existing_rounds: list[Round],
+	pics: dict[str, 'GeoSeries | Sequence[shapely.Point]'],
 	scoring: ScoringOptions,
 	strategy: SimulatedStrategy,
 	targets_path: Path | None,
@@ -58,7 +64,7 @@ def get_simulation(
 ) -> tuple[Simulation, bool]:
 	if not targets_path and not num_random_rounds:
 		return simulate_existing_rounds(
-			existing_rounds, scoring, strategy, use_haversine=use_haversine
+			existing_rounds, pics, scoring, strategy, use_haversine=use_haversine
 		), True
 
 	if targets_path:
@@ -79,10 +85,6 @@ def get_simulation(
 		rounds = {format_point(point): point for point in points}
 	else:
 		raise RuntimeError('Not sure how we got here')
-	pics = {
-		player: shapely.points([(lng, lat) for lat, lng in latlngs]).tolist()
-		for player, latlngs in get_submissions_per_user(existing_rounds).items()
-	}
 	return Simulation(rounds, None, pics, scoring, strategy, use_haversine=use_haversine), False
 
 
@@ -111,6 +113,25 @@ def output_results(
 	print(player_summary)
 	if output_path:
 		player_summary.to_csv(output_path)
+
+
+def get_pics(
+	rounds: list[Round], name: str | None, points_path: Path | None, threshold: int | None
+):
+	pics = {
+		player: shapely.points([(lng, lat) for lat, lng in latlngs]).tolist()
+		for player, latlngs in get_submissions_per_user(rounds).items()
+		if threshold is None or len(latlngs) >= threshold
+	}
+	if points_path:
+		if not name:
+			print('Warning: --points-path does not do anything without --name')
+		else:
+			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
+			pics[name] = try_set_index_name_col(load_points(points_path)).geometry
+	if not pics:
+		raise RuntimeError('Nobody is able to be simulated')
+	return pics
 
 
 def main() -> None:
@@ -183,6 +204,11 @@ def main() -> None:
 		type=Path,
 		help="In conjunction with --name, replace your points with those loaded from this file (to use pics that you haven't submitted yet)",
 	)
+	player_args.add_argument(
+		'--threshold',
+		type=int,
+		help='Only simulate players who have submitted at least this amount of pics. This can help speed up the simulation',
+	)
 	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
 	# TODO: Option to add some point sets as fictional players
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
@@ -207,8 +233,11 @@ def main() -> None:
 		scoring = main_tpg_scoring
 
 	existing_rounds = load_rounds(path)  # Stil need this either way to get the submissions
+
+	pics = get_pics(existing_rounds, name, points_path, args.threshold)
 	simulation, using_existing_rounds = get_simulation(
 		existing_rounds,
+		pics,
 		scoring,
 		strategy,
 		targets_path,
@@ -216,12 +245,6 @@ def main() -> None:
 		region_path,
 		use_haversine=args.use_haversine,
 	)
-	if points_path:
-		if not name:
-			print('Warning: --points-path does not do anything without --name')
-		else:
-			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			simulation.player_pics[name] = try_set_index_name_col(load_points(points_path)).geometry
 
 	if name not in simulation.player_pics:
 		print(
@@ -234,7 +257,7 @@ def main() -> None:
 		new_rounds,
 		existing_rounds,
 		name,
-		args.round_output_path,
+		args.rounds_output_path,
 		args.output_path,
 		using_existing_rounds=using_existing_rounds,
 	)
