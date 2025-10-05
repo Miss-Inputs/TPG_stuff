@@ -2,13 +2,13 @@
 
 Some scripts for dealing with the [Travel Pics Game](https://tinyurl.com/tpgrulesfaq) in Chicago Geographer's Discord server. Basically all of this is a command line interface for stuff in [travelpygame](https://github.com/Miss-Inputs/travelpygame/tree/main), so you'll want to set up a virtual environment with that installed (via git, etc).
 
-To get started you'll probably need to set some environment variables to decide where to save some files, see settings.py for which ones, though if I rewrite this then you won't need to do that anymore.
+It may help to set MAIN_TPG_DATA_PATH in the environment or in a .env file to something, this automatically saves TPG data there so you don't have to download it again or enter its location every time.
 
 ### Terminology
 
 The phrase "TPG data" or "TPG data file" is something I haven't invented the best terminology for yet, it is a .json file containing a list of rounds and submissions for each round, either from main TPG or a spinoff. Sometimes I end up saying something awkward like "rounds and submissions" which is a bit of a mouthful.
 
-The phrase "point set" is also something I haven't figured out the best wording for, it refers to a file containing a list of locations that you have pics for (with optional name/description), such as a .csv exported from [scottytremaine's voronoi generator](https://tpg.scottytremaine.uk/), or can be an .ods or .xlsx spreadsheet, or a .geojson/.gpkg/etc file containing point geometries, or various other formats that pandas DataFrames can be loaded from. "Target points" or "target point set" refers to these same formats but instead of locations that you have pics for/have been to, it represents locations that you want the distance to, e.g. TPG rounds.
+The phrase "point set" is also something I haven't figured out the best wording for, it refers to a file containing a list of locations that you have pics for (with optional name/description), such as a .csv exported from [scottytremaine's voronoi generator](https://tpg.scottytremaine.uk/), or can be an .ods or .xlsx spreadsheet, or a .geojson/.gpkg/etc file containing point geometries, or various other formats that pandas DataFrames can be loaded from (that would have a lat and lng column). "Target points" or "target point set" refers to these same formats but instead of locations that you have pics for/have been to, it represents locations that you want the distance to, e.g. TPG rounds.
 
 The phrase "TPG area" or "defined area" refers to the part of the world that rounds in a regional TPG (AusTPG, EuroTPG, Japan TPG, etc) can be drawn from.
 
@@ -47,9 +47,10 @@ Things to help figure out where to actually go in real life so you can have a be
 
 - Custom travel map: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
 - Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
+- Most used pics: Finds pics that are used multiple times in TPG (or in a TPG data file).
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
 - Plot user submissions: Plots rounds and submissions and arrows from the submission to the round, given TPG data and a player name. NOTE: This currently needs rewriting and also hardcodes some stuff.
-- Simulate rounds: Re-runs each TPG round (or soon, other targets) with every user's known pics, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
+- Simulate rounds: Re-runs each TPG round or simulates a new one with points from a file or randomly generated, with every user's known pics from TPG data, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
 
 ### Unsorted
 

@@ -142,7 +142,6 @@ def main() -> None:
 		default=True,
 	)
 	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
-	# TODO: Many more options - generate randomly from regions, etc
 	# TODO: Option to add some point sets as fictional players
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()
@@ -179,6 +178,7 @@ def main() -> None:
 		if not name:
 			print('Warning: --points-path does not do anything without --name')
 		else:
+			#TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
 			simulation.player_pics[name] = try_set_index_name_col(load_points(points_path)).geometry
 
 	new_rounds = simulation.simulate_rounds()
