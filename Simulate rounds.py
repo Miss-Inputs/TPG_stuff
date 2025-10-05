@@ -86,6 +86,33 @@ def get_simulation(
 	return Simulation(rounds, None, pics, scoring, strategy, use_haversine=use_haversine), False
 
 
+def output_results(
+	new_rounds: list[Round],
+	existing_rounds: list[Round],
+	name: str | None,
+	rounds_output_path: Path | None,
+	output_path: Path | None,
+	*,
+	using_existing_rounds: bool = False,
+):
+	if using_existing_rounds:
+		for result in new_rounds:
+			r = next((r for r in existing_rounds if r.name == result.name), None)
+			if r:
+				compare_rounds(r, result, name)
+
+	round_summary = get_round_summary(new_rounds, name)
+	print(round_summary)
+	if rounds_output_path:
+		round_summary.to_csv(rounds_output_path)
+
+	# TODO: More detailed stats here, like maybe a whole entire leaderboard
+	player_summary = get_player_summary(new_rounds)
+	print(player_summary)
+	if output_path:
+		player_summary.to_csv(output_path)
+
+
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	strategy_choices = {s.name.lower(): s for s in SimulatedStrategy}
@@ -178,26 +205,24 @@ def main() -> None:
 		if not name:
 			print('Warning: --points-path does not do anything without --name')
 		else:
-			#TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
+			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
 			simulation.player_pics[name] = try_set_index_name_col(load_points(points_path)).geometry
 
+	if name not in simulation.player_pics:
+		print(
+			f'Warning: {name} was not found in TPG data or otherwise did not have any pics, so does not exist in this context. Setting to None'
+		)
+		name = None
+
 	new_rounds = simulation.simulate_rounds()
-	if using_existing_rounds:
-		for result in new_rounds:
-			r = next((r for r in existing_rounds if r.name == result.name), None)
-			if r:
-				compare_rounds(r, result, name)
-
-	round_summary = get_round_summary(new_rounds)
-	print(round_summary)
-	if args.rounds_output_path:
-		round_summary.to_csv(args.rounds_output_path)
-
-	# TODO: More detailed stats here, like maybe a whole entire leaderboard
-	player_summary = get_player_summary(new_rounds)
-	print(player_summary)
-	if args.output_path:
-		player_summary.to_csv(args.output_path)
+	output_results(
+		new_rounds,
+		existing_rounds,
+		name,
+		args.round_output_path,
+		args.output_path,
+		using_existing_rounds=using_existing_rounds,
+	)
 
 
 if __name__ == '__main__':
