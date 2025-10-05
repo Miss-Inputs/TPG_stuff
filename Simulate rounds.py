@@ -119,9 +119,16 @@ def main() -> None:
 	argparser.add_argument(
 		'data_path',
 		type=Path,
-		help='Path to TPG data to use (to get submissions from), and if an option such as --targets is not specified, the rounds will be used',
+		help='Path to TPG data to use (to get submissions from), and if a target argument is not specified, the rounds will be used',
 	)
-	target_args = argparser.add_mutually_exclusive_group(required=False)
+	argparser.add_argument(
+		'--name',
+		help='Optionally keep track of a particular player (likely use case = yourself) and how their submission changes',
+	)
+
+	target_args = argparser.add_argument_group(
+		'Target arguments', 'Which locations will be the targets of each simulated round'
+	).add_mutually_exclusive_group(required=False)
 	target_args.add_argument(
 		'--targets',
 		type=Path,
@@ -136,37 +143,45 @@ def main() -> None:
 		help='If this is specified, it must be two arguments: number of points and path of a file containing geometry to generate random points in',
 	)
 
-	argparser.add_argument(
-		'--name',
-		help='Optionally keep track of a particular player (likely use case = yourself) and how their submission changes',
+	sim_args = argparser.add_argument_group(
+		'Simulation arguments', 'Arguments controlling how the simulation is simulated'
 	)
-	argparser.add_argument(
-		'--points-path',
-		type=Path,
-		help="In conjunction with --name, replace your points with those loaded from this file (to use pics that you haven't submitted yet)",
-	)
-	argparser.add_argument(
-		'--output-path', type=Path, help='Output total scores/etc of simulated players here'
-	)
-	argparser.add_argument(
-		'--rounds-output-path', type=Path, help='Output winners/etc of each round here'
-	)
-	argparser.add_argument(
+	sim_args.add_argument(
 		'--custom-scoring',
 		type=float,
 		help="If specified, use a scoring method for regional TPGs with this as the world distance in km. If not specified, use main TPG scoring. This is a bit awkward but I could'nt think of anything better right now whoops",
 	)
-	argparser.add_argument(
+	sim_args.add_argument(
 		'--strategy',
 		choices=strategy_choices.keys(),
 		help='Strategy of simulated players',
 		default='closest',
 	)
-	argparser.add_argument(
+	sim_args.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
 		help='Use haversine for distances, defaults to true',
 		default=True,
+	)
+
+	output_args = argparser.add_argument_group(
+		'Output arguments', 'Arguments specifying what is output and where'
+	)
+	output_args.add_argument(
+		'--output-path', type=Path, help='Output total scores/etc of simulated players here'
+	)
+	output_args.add_argument(
+		'--rounds-output-path', type=Path, help='Output winners/etc of each round here'
+	)
+
+	player_args = argparser.add_argument_group(
+		'Pics arguments',
+		'Arguments to control what simulated players exist and what pics they have',
+	)
+	player_args.add_argument(
+		'--points-path',
+		type=Path,
+		help="In conjunction with --name, replace your points with those loaded from this file (to use pics that you haven't submitted yet)",
 	)
 	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
 	# TODO: Option to add some point sets as fictional players
