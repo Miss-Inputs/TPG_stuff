@@ -14,7 +14,7 @@ from travelpygame import (
 	load_rounds,
 	main_tpg_scoring,
 )
-from travelpygame.random_points import random_point_in_bbox
+from travelpygame.random_points import random_point_in_bbox, random_points_in_poly
 from travelpygame.simulation import (
 	SimulatedStrategy,
 	Simulation,
@@ -22,7 +22,7 @@ from travelpygame.simulation import (
 	get_round_summary,
 	simulate_existing_rounds,
 )
-from travelpygame.util import format_point, format_xy, try_set_index_name_col
+from travelpygame.util import format_point, format_xy, read_geodataframe, try_set_index_name_col
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -52,9 +52,10 @@ def get_simulation(
 	strategy: SimulatedStrategy,
 	targets_path: Path | None,
 	num_random_rounds: int | None,
+	region_path: Path | None,
 	*,
 	use_haversine: bool,
-):
+) -> tuple[Simulation, bool]:
 	if not targets_path and not num_random_rounds:
 		return simulate_existing_rounds(
 			existing_rounds, scoring, strategy, use_haversine=use_haversine
@@ -68,7 +69,13 @@ def get_simulation(
 			if isinstance(point, shapely.Point)
 		}
 	elif num_random_rounds:
-		points = [random_point_in_bbox(-180, -90, 180, 90) for _ in range(num_random_rounds)]
+		if region_path:
+			region = read_geodataframe(region_path)
+			points = random_points_in_poly(
+				region, num_random_rounds, use_tqdm=True, desc='Generating random points'
+			)
+		else:
+			points = [random_point_in_bbox(-180, -90, 180, 90) for _ in range(num_random_rounds)]
 		rounds = {format_point(point): point for point in points}
 	else:
 		raise RuntimeError('Not sure how we got here')
@@ -95,6 +102,11 @@ def main() -> None:
 	)
 	target_args.add_argument(
 		'--random-rounds', type=int, help='If this is specified, generate N random rounds'
+	)
+	target_args.add_argument(
+		'--random-in-region',
+		nargs=2,
+		help='If this is specified, it must be two arguments: number of points and path of a file containing geometry to generate random points in',
 	)
 
 	argparser.add_argument(
@@ -139,6 +151,14 @@ def main() -> None:
 	name: str | None = args.name
 	points_path: Path | None = args.points_path
 	targets_path: Path | None = args.targets
+	num_random_points: int | None = args.random_rounds
+	random_points = args.random_in_region
+	if random_points:
+		num_random_points = int(random_points[0])
+		region_path = Path(random_points[1])
+	else:
+		region_path = None
+
 	strategy = strategy_choices[args.strategy]
 	if args.custom_scoring:
 		scoring = ScoringOptions(7500, None, None, None, args.custom_scoring)
@@ -151,7 +171,8 @@ def main() -> None:
 		scoring,
 		strategy,
 		targets_path,
-		args.random_rounds,
+		num_random_points,
+		region_path,
 		use_haversine=args.use_haversine,
 	)
 	if points_path:
