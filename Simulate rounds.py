@@ -3,11 +3,8 @@
 
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections import defaultdict
-from operator import itemgetter
 from pathlib import Path
 
-import pandas
 import shapely
 from travelpygame import (
 	Round,
@@ -17,8 +14,15 @@ from travelpygame import (
 	load_rounds,
 	main_tpg_scoring,
 )
-from travelpygame.simulation import SimulatedStrategy, Simulation, simulate_existing_rounds
-from travelpygame.util import format_xy, try_set_index_name_col
+from travelpygame.random_points import random_point_in_bbox
+from travelpygame.simulation import (
+	SimulatedStrategy,
+	Simulation,
+	get_player_summary,
+	get_round_summary,
+	simulate_existing_rounds,
+)
+from travelpygame.util import format_point, format_xy, try_set_index_name_col
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -42,25 +46,37 @@ def compare_rounds(old_round: Round, new_round: Round, name: str | None):
 			print(f'{old_round.name}: Previously submitted {old_desc}, now would submit {new_desc}')
 
 
-def get_round_summary(new_rounds: list[Round]):
-	scores_by_round: defaultdict[str, dict[str, float]] = defaultdict(dict)
-	for r in new_rounds:
-		assert r.name is not None, 'why is r.name None'
-		for sub in r.submissions:
-			assert sub.score is not None, 'why is sub.score None'
-			scores_by_round[sub.name][r.name] = sub.score
-	rows = []
-	valuegetter = itemgetter(1)
-	for name, scores in scores_by_round.items():
-		row = {'name': name, 'total': sum(scores.values())}
-		row['best_round'], row['best_score'] = max(scores.items(), key=valuegetter)
-		row['worst_round'], row['worst_score'] = min(scores.items(), key=valuegetter)
-		rows.append(row)
-	return (
-		pandas.DataFrame(rows)
-		.set_index('name', verify_integrity=True)
-		.sort_values('total', ascending=False)
-	)
+def get_simulation(
+	existing_rounds: list[Round],
+	scoring: ScoringOptions,
+	strategy: SimulatedStrategy,
+	targets_path: Path | None,
+	num_random_rounds: int | None,
+	*,
+	use_haversine: bool,
+):
+	if not targets_path and not num_random_rounds:
+		return simulate_existing_rounds(
+			existing_rounds, scoring, strategy, use_haversine=use_haversine
+		), True
+
+	if targets_path:
+		targets = try_set_index_name_col(load_points(targets_path))
+		rounds = {
+			str(index): point
+			for index, point in targets.geometry.items()
+			if isinstance(point, shapely.Point)
+		}
+	elif num_random_rounds:
+		points = [random_point_in_bbox(-180, -90, 180, 90) for _ in range(num_random_rounds)]
+		rounds = {format_point(point): point for point in points}
+	else:
+		raise RuntimeError('Not sure how we got here')
+	pics = {
+		player: shapely.points([(lng, lat) for lat, lng in latlngs]).tolist()
+		for player, latlngs in get_submissions_per_user(existing_rounds).items()
+	}
+	return Simulation(rounds, None, pics, scoring, strategy, use_haversine=use_haversine), False
 
 
 def main() -> None:
@@ -77,6 +93,9 @@ def main() -> None:
 		type=Path,
 		help='If this path is specified, load points from this file to be used as each round',
 	)
+	target_args.add_argument(
+		'--random-rounds', type=int, help='If this is specified, generate N random rounds'
+	)
 
 	argparser.add_argument(
 		'--name',
@@ -88,7 +107,10 @@ def main() -> None:
 		help="In conjunction with --name, replace your points with those loaded from this file (to use pics that you haven't submitted yet)",
 	)
 	argparser.add_argument(
-		'--output-path', type=Path, help='Output total scores of simulated players here'
+		'--output-path', type=Path, help='Output total scores/etc of simulated players here'
+	)
+	argparser.add_argument(
+		'--rounds-output-path', type=Path, help='Output winners/etc of each round here'
 	)
 	argparser.add_argument(
 		'--custom-scoring',
@@ -123,23 +145,15 @@ def main() -> None:
 	else:
 		scoring = main_tpg_scoring
 
-	rounds = load_rounds(path)  # Stil need this either way to get the submissions
-	if targets_path:
-		targets = try_set_index_name_col(load_points(targets_path))
-		d = {
-			str(index): point
-			for index, point in targets.geometry.items()
-			if isinstance(point, shapely.Point)
-		}
-		pics = {
-			player: shapely.points([(lng, lat) for lat, lng in latlngs]).tolist()
-			for player, latlngs in get_submissions_per_user(rounds).items()
-		}
-		simulation = Simulation(d, None, pics, scoring, strategy, use_haversine=args.use_haversine)
-	else:
-		simulation = simulate_existing_rounds(
-			rounds, scoring, strategy, use_haversine=args.use_haversine
-		)
+	existing_rounds = load_rounds(path)  # Stil need this either way to get the submissions
+	simulation, using_existing_rounds = get_simulation(
+		existing_rounds,
+		scoring,
+		strategy,
+		targets_path,
+		args.random_rounds,
+		use_haversine=args.use_haversine,
+	)
 	if points_path:
 		if not name:
 			print('Warning: --points-path does not do anything without --name')
@@ -147,16 +161,22 @@ def main() -> None:
 			simulation.player_pics[name] = try_set_index_name_col(load_points(points_path)).geometry
 
 	new_rounds = simulation.simulate_rounds()
-	for result in new_rounds:
-		r = next((r for r in rounds if r.name == result.name), None)
-		if r:
-			compare_rounds(r, result, name)
+	if using_existing_rounds:
+		for result in new_rounds:
+			r = next((r for r in existing_rounds if r.name == result.name), None)
+			if r:
+				compare_rounds(r, result, name)
+
+	round_summary = get_round_summary(new_rounds)
+	print(round_summary)
+	if args.rounds_output_path:
+		round_summary.to_csv(args.rounds_output_path)
 
 	# TODO: More detailed stats here, like maybe a whole entire leaderboard
-	summary = get_round_summary(new_rounds)
-	print(summary)
+	player_summary = get_player_summary(new_rounds)
+	print(player_summary)
 	if args.output_path:
-		summary.to_csv(args.output_path)
+		player_summary.to_csv(args.output_path)
 
 
 if __name__ == '__main__':
