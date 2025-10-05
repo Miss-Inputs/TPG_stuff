@@ -14,9 +14,8 @@ from numpy.random import default_rng
 from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Point, Polygon
-from tqdm.auto import tqdm, trange
-from travelpygame import output_geodataframe
-from travelpygame.random_points import random_point_in_poly
+from tqdm.auto import tqdm
+from travelpygame import output_geodataframe, random_point_in_poly, random_points_in_poly
 from travelpygame.util import format_distance, format_point, read_geodataframe_async
 
 from lib.format_utils import describe_point
@@ -79,10 +78,11 @@ async def _random_points_in_poly(
 	random = default_rng(seed)
 	total_data: defaultdict[str, list[Any]] = defaultdict(list)
 	rows = []
+	points = random_points_in_poly(
+		gdf, num_points, random, use_tqdm=True, desc='Generating points', unit='point'
+	)
 	async with ClientSession() as sesh:
-		for i in trange(1, num_points + 1, desc='Generating points', unit='point'):
-			# TODO: This should be refactored to use random_points_in_poly here instead, although without that using a vectorized implementation, it most likely does not make a difference
-			point = random_point_in_poly(gdf, random, use_tqdm=False)
+		for i, point in enumerate(points):
 			point = shapely.ops.transform(to_wgs84.transform, point)
 			if value_cols:
 				data = _get_point_data(point, gdf, value_cols)
