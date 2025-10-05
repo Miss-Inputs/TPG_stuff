@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import shapely
+from pandas import Index, RangeIndex
 from travelpygame import (
 	Round,
 	ScoringOptions,
@@ -115,20 +116,45 @@ def output_results(
 		player_summary.to_csv(output_path)
 
 
+def load_with_name(path: Path | str):
+	points = load_points(path)
+	points = try_set_index_name_col(points)
+	if isinstance(points.index, RangeIndex):
+		# Try and get something more descriptive than just the default increasing index
+		points.index = Index(
+			[
+				format_point(geo) if isinstance(geo, shapely.Point) else str(geo)
+				for geo in points.geometry
+			]
+		)
+	return points
+
+
 def get_pics(
-	rounds: list[Round], name: str | None, points_path: Path | None, threshold: int | None
+	rounds: list[Round],
+	name: str | None,
+	points_path: Path | None,
+	threshold: int | None,
+	additional_players: list[list[str]] | None,
 ):
 	pics = {
 		player: shapely.points([(lng, lat) for lat, lng in latlngs]).tolist()
 		for player, latlngs in get_submissions_per_user(rounds).items()
 		if threshold is None or len(latlngs) >= threshold
 	}
+	if additional_players:
+		for additional_name, path in additional_players:
+			points = load_with_name(path)
+			pics[additional_name] = points.geometry
+
 	if points_path:
 		if not name:
-			print('Warning: --points-path does not do anything without --name')
+			print(
+				'Warning: --points-path does not do anything without --name. You may want to use --add-player if these points are for a different player'
+			)
 		else:
 			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			pics[name] = try_set_index_name_col(load_points(points_path)).geometry
+			pics[name] = load_with_name(points_path).geometry
 	if not pics:
 		raise RuntimeError('Nobody is able to be simulated')
 	return pics
@@ -161,6 +187,7 @@ def main() -> None:
 	target_args.add_argument(
 		'--random-in-region',
 		nargs=2,
+		metavar=('number_of_points', 'path'),
 		help='If this is specified, it must be two arguments: number of points and path of a file containing geometry to generate random points in',
 	)
 
@@ -209,8 +236,16 @@ def main() -> None:
 		type=int,
 		help='Only simulate players who have submitted at least this amount of pics. This can help speed up the simulation',
 	)
+	player_args.add_argument(
+		'--add-player',
+		'--additional-player',
+		dest='add_player',
+		action='append',
+		nargs=2,
+		metavar=('name', 'point_set_path'),
+		help='Add a new player with a name and points from a file (pair of arguments in that order, can be specified multiple times)',
+	)
 	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
-	# TODO: Option to add some point sets as fictional players
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()
 
@@ -234,7 +269,7 @@ def main() -> None:
 
 	existing_rounds = load_rounds(path)  # Stil need this either way to get the submissions
 
-	pics = get_pics(existing_rounds, name, points_path, args.threshold)
+	pics = get_pics(existing_rounds, name, points_path, args.threshold, args.add_player)
 	simulation, using_existing_rounds = get_simulation(
 		existing_rounds,
 		pics,
