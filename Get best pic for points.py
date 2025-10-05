@@ -14,8 +14,8 @@ from travelpygame.util import (
 	find_first_matching_column,
 	format_distance,
 	format_point,
-	geodataframe_to_csv,
 	load_points,
+	output_geodataframe,
 )
 
 from lib.geo_utils import geod_distance_and_bearing, haversine_distance
@@ -105,10 +105,7 @@ def main() -> None:
 	print('Average distance:', format_distance(dests['distance'].mean()))
 
 	if args.out_path:
-		if args.out_path.suffix[1:].lower() == 'csv':
-			geodataframe_to_csv(dests, args.out_path, index=False)
-		else:
-			dests.to_file(args.out_path)
+		output_geodataframe(dests, args.out_path, index=False)
 	if args.threshold:
 		threshold: float = args.threshold * 1_000
 		counts = dests[dests['distance'] < threshold]['best'].value_counts()

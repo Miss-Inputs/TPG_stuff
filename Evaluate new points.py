@@ -20,9 +20,9 @@ from travelpygame.new_pic_eval import (
 from travelpygame.util import (
 	format_distance,
 	format_point,
-	geodataframe_to_csv,
 	get_closest_point_index,
 	load_points,
+	output_geodataframe,
 	try_set_index_name_col,
 )
 
@@ -178,7 +178,7 @@ def main() -> None:
 	distances = distances.drop(columns='coords')
 
 	if args.distances_output_path:
-		geodataframe_to_csv(distances, args.output_path, index=False)
+		output_geodataframe(distances, args.output_path, index=False)
 	if args.targets:
 		eval_with_targets(
 			points,

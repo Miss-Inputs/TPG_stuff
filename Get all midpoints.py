@@ -11,7 +11,7 @@ import geopandas
 import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
-from travelpygame.util import format_point, geodataframe_to_csv, get_midpoint, load_points_async
+from travelpygame.util import format_point, get_midpoint, load_points_async, output_geodataframe
 
 from lib.format_utils import describe_point
 
@@ -62,10 +62,7 @@ async def main() -> None:
 	gdf = geopandas.GeoDataFrame(data, crs='wgs84')
 	print(gdf)
 	if args.out_path:
-		if args.out_path.suffix[1:].lower() == 'csv':
-			await asyncio.to_thread(geodataframe_to_csv, gdf, args.out_path, index=False)
-		else:
-			await asyncio.to_thread(gdf.to_file, args.out_path)
+		await asyncio.to_thread(output_geodataframe, gdf, args.out_path, index=False)
 
 
 if __name__ == '__main__':

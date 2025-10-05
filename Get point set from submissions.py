@@ -9,8 +9,7 @@ from pathlib import Path
 
 from geopandas import GeoDataFrame
 from shapely import Point
-from travelpygame import get_main_tpg_rounds_with_path, load_rounds_async
-from travelpygame.util import geodataframe_to_csv
+from travelpygame import get_main_tpg_rounds_with_path, load_rounds_async, output_geodataframe
 
 from lib.settings import Settings
 
@@ -52,10 +51,7 @@ async def main() -> None:
 	)
 	print(gdf)
 	if output_path:
-		if output_path.suffix[1:].lower() == 'csv':
-			await asyncio.to_thread(geodataframe_to_csv, gdf, output_path, index=False)
-		else:
-			gdf.to_file(args.output_path)
+		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from aiohttp import ClientSession
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame.util import geodataframe_to_csv, load_points_async
+from travelpygame import load_points_async, output_geodataframe
 
 from lib.reverse_geocode import reverse_geocode_address
 
@@ -92,10 +92,7 @@ async def main() -> None:
 	print(gdf)
 	output_path: Path | None = args.output_path
 	if output_path:
-		if output_path.suffix.lower()[1:] == 'csv':
-			geodataframe_to_csv(gdf, output_path, insert_before=True, index=False)
-		else:
-			await asyncio.to_thread(gdf.to_file, output_path)
+		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
 
 
 if __name__ == '__main__':

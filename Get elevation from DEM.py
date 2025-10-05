@@ -7,7 +7,7 @@ import rasterio
 import shapely
 from numpy.ma import masked
 from tqdm.auto import tqdm
-from travelpygame.util import geodataframe_to_csv, load_points
+from travelpygame import load_points, output_geodataframe
 
 
 def main() -> None:
@@ -65,7 +65,7 @@ def main() -> None:
 			)
 		}
 	gdf['elevation'] = data
-	geodataframe_to_csv(gdf, args.output_path, index=False)
+	output_geodataframe(gdf, args.output_path, index=False)
 
 
 if __name__ == '__main__':
