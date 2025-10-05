@@ -32,7 +32,7 @@ def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: lis
 async def _random_single_point_in_poly(
 	poly: Polygon | MultiPolygon | None,
 	gdf: 'geopandas.GeoDataFrame',
-	to_wgs84: Transformer,
+	to_wgs84: Transformer | None,
 	to_utm: Transformer,
 	value_cols: list[str],
 	seed: int | None,
@@ -43,7 +43,7 @@ async def _random_single_point_in_poly(
 		raw_point = random_point_in_poly(
 			gdf, seed, use_tqdm=True, desc='Finding point inside poly', unit='attempt'
 		)
-		point = shapely.ops.transform(to_wgs84.transform, raw_point)
+		point = shapely.ops.transform(to_wgs84.transform, raw_point) if to_wgs84 else raw_point
 		print(format_point(point))
 		if value_cols:
 			data = _get_point_data(raw_point, gdf, value_cols)
@@ -68,12 +68,13 @@ async def _random_single_point_in_poly(
 async def _random_points_in_poly(
 	num_points: int,
 	gdf: 'geopandas.GeoDataFrame',
-	to_wgs84: Transformer,
+	to_wgs84: Transformer | None,
 	value_cols: list[str],
 	seed: int | None,
 	*,
 	print_each_point: bool,
 	stats: bool,
+	reverse_geocode: bool,
 ) -> geopandas.GeoDataFrame:
 	random = default_rng(seed)
 	total_data: defaultdict[str, list[Any]] = defaultdict(list)
@@ -81,19 +82,25 @@ async def _random_points_in_poly(
 	points = random_points_in_poly(
 		gdf, num_points, random, use_tqdm=True, desc='Generating points', unit='point'
 	)
+	if to_wgs84:
+		points = [shapely.ops.transform(to_wgs84.transform, point) for point in points]
 	async with ClientSession() as sesh:
 		for i, point in enumerate(points):
-			point = shapely.ops.transform(to_wgs84.transform, point)
 			if value_cols:
 				data = _get_point_data(point, gdf, value_cols)
 				desc = ', '.join(str(datum) for datum in data)
-				for k, v in data.items():
-					assert isinstance(k, str), type(k)
-					total_data[k].append(v)
+				if stats:
+					for k, v in data.items():
+						assert isinstance(k, str), type(k)
+						total_data[k].append(v)
 				rows.append({'point': point, **data.to_dict()})
-			else:
+			elif reverse_geocode:
 				desc = await describe_point(point, sesh)
 				rows.append({'point': point, 'name': desc})
+			else:
+				desc = ''
+				rows.append({'point': point})
+
 			if print_each_point:
 				tqdm.write(f'{i}: {format_point(point)} {desc}')
 	if stats:
@@ -125,7 +132,7 @@ async def main() -> None:
 		'--value-columns',
 		'--value-cols',
 		nargs='*',
-		help='Prints values of the random point(s) where they line up with rows in the input file, so you can use --value-columns state country for example',
+		help='Prints values of the random point(s) where they line up with rows in the input file, so you can use --value-columns state country to print the state and the country that each point is in, for example, if the file contains those columns. This will also be saved into --output-path if that is used.',
 		dest='value_cols',
 	)
 	argparser.add_argument(
@@ -133,6 +140,12 @@ async def main() -> None:
 		action=BooleanOptionalAction,
 		default=False,
 		help='Display some info about the generated point if n == 1, or counts of things in the generated columns if n > 1',
+	)
+	argparser.add_argument(
+		'--reverse-geocode',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Reverse geocode the address of each point if --value-cols is not specified, defaults to false',
 	)
 	argparser.add_argument(
 		'--seed',
@@ -154,8 +167,11 @@ async def main() -> None:
 	value_cols: list[str] = args.value_cols
 
 	gdf = await read_geodataframe_async(path)
+	if gdf.crs and gdf.crs.equals('wgs84'):
+		to_wgs84 = None
+	else:
+		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	utm = gdf.estimate_utm_crs()
-	to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
 
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
@@ -184,6 +200,7 @@ async def main() -> None:
 			seed,
 			print_each_point=output_path is None,
 			stats=args.stats,
+			reverse_geocode=args.reverse_geocode,
 		)
 		if output_path:
 			output_geodataframe(points, output_path, index=False)
