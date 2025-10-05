@@ -13,6 +13,7 @@ from numpy.random import default_rng
 from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Point, Polygon
+from tqdm.auto import tqdm, trange
 from travelpygame.random_points import random_point_in_poly
 from travelpygame.util import format_distance, format_point, read_geodataframe_async
 
@@ -31,7 +32,7 @@ def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: lis
 
 
 async def _random_single_point_in_poly(
-	poly: Polygon | MultiPolygon,
+	poly: Polygon | MultiPolygon | None,
 	gdf: 'geopandas.GeoDataFrame',
 	to_wgs84: Transformer,
 	to_utm: Transformer,
@@ -42,7 +43,7 @@ async def _random_single_point_in_poly(
 ):
 	async with ClientSession() as sesh:
 		raw_point = random_point_in_poly(
-			poly, seed, use_tqdm=True, desc='Finding point inside poly', unit='attempt'
+			gdf, seed, use_tqdm=True, desc='Finding point inside poly', unit='attempt'
 		)
 		point = shapely.ops.transform(to_wgs84.transform, raw_point)
 		print(format_point(point))
@@ -53,7 +54,7 @@ async def _random_single_point_in_poly(
 		else:
 			desc = await describe_point(point, sesh)
 			print(desc)
-		if stats:
+		if stats and poly:
 			utm_poly = shapely.ops.transform(to_utm.transform, poly)
 			utm_point = shapely.ops.transform(to_utm.transform, raw_point)
 			utm_furthest_point, distance = get_longest_distance_from_point(utm_poly, utm_point)
@@ -67,7 +68,6 @@ async def _random_single_point_in_poly(
 
 
 async def _random_points_in_poly(
-	poly: Polygon | MultiPolygon,
 	num_points: int,
 	gdf: 'geopandas.GeoDataFrame',
 	to_wgs84: Transformer,
@@ -79,9 +79,10 @@ async def _random_points_in_poly(
 	random = default_rng(seed)
 	total_data: defaultdict[str, list[Any]] = defaultdict(list)
 	async with ClientSession() as sesh:
-		for i in range(1, num_points + 1):
+		for i in trange(1, num_points + 1, desc='Generating points', unit='point'):
+			# TODO: This should be refactored to use random_points_in_poly here instead, although without that using a vectorized implementation, it most likely does not make a difference
 			point = random_point_in_poly(
-				poly,
+				gdf,
 				random,
 				use_tqdm=True,
 				desc='Finding point inside poly',
@@ -91,19 +92,19 @@ async def _random_points_in_poly(
 			point = shapely.ops.transform(to_wgs84.transform, point)
 			if value_cols:
 				data = _get_point_data(point, gdf, value_cols)
-				desc = ', '.join(data.to_list())
+				desc = ', '.join(str(datum) for datum in data)
 				for k, v in data.items():
 					assert isinstance(k, str), type(k)
 					total_data[k].append(v)
 			else:
 				desc = await describe_point(point, sesh)
-			print(f'{i}: {format_point(point)} {desc}')
+			tqdm.write(f'{i}: {format_point(point)} {desc}')
 	if stats:
 		for col, values in total_data.items():
 			counter = Counter(values)
-			print(f'{col}:')
-			print(summarize_counter(counter))
-			print('-' * 10)
+			tqdm.write(f'{col}:')
+			tqdm.write(str(summarize_counter(counter)))
+			tqdm.write('-' * 10)
 
 
 async def main() -> None:
@@ -146,29 +147,34 @@ async def main() -> None:
 	args = argparser.parse_args()
 
 	path = args.path
+	n: int = args.n
+	seed: int | None = args.seed
+	value_cols: list[str] = args.value_cols
+
 	gdf = await read_geodataframe_async(path)
 	utm = gdf.estimate_utm_crs()
 	to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
 
-	if gdf.index.size == 1 and isinstance(gdf.geometry.iloc[0], (Polygon, MultiPolygon)):
-		poly = gdf.geometry.iloc[0]
-		assert isinstance(poly, (Polygon, MultiPolygon)), 'what'
+	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
+	if args.stats and n == 1:
+		# Now we only need to generate the union if we want stats for a single point
+		if gdf.index.size == 1 and isinstance(gdf.geometry.iloc[0], (Polygon, MultiPolygon)):
+			poly = gdf.geometry.iloc[0]
+			assert isinstance(poly, (Polygon, MultiPolygon)), 'what'
+		else:
+			poly = gdf.union_all()
+			if not isinstance(poly, (Polygon, MultiPolygon)):
+				raise TypeError(f'{path} must contain polygon(s), got {type(poly)}')
 	else:
-		poly = gdf.union_all()
-		if not isinstance(poly, (Polygon, MultiPolygon)):
-			# TODO: Support points as well
-			raise TypeError(f'{path} must contain polygon(s), got {type(poly)}')
+		poly = None
 
-	n: int = args.n
-	seed: int | None = args.seed
-	value_cols: list[str] = args.value_cols
 	if n == 1:
 		await _random_single_point_in_poly(
 			poly, gdf, to_wgs84, to_utm, value_cols, seed, stats=args.stats
 		)
 	else:
-		await _random_points_in_poly(poly, n, gdf, to_wgs84, value_cols, seed, stats=args.stats)
+		await _random_points_in_poly(n, gdf, to_wgs84, value_cols, seed, stats=args.stats)
 
 
 if __name__ == '__main__':
