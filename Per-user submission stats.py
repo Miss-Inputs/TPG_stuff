@@ -43,12 +43,14 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 	return hull, area, perimeter
 
 
-def stats_for_each_user(rounds: list[Round]):
+def stats_for_each_user(rounds: list[Round], threshold: int | None = None):
 	per_user = get_submissions_per_user(rounds)
 	data = {}
 	with tqdm(per_user.items(), 'Calculating stats', unit='player') as t:
 		for name, latlngs in t:
 			t.set_postfix(name=name)
+			if threshold and len(latlngs) < threshold:
+				continue
 			# TODO: These should all be parameters whether to calculate each particular stat or not
 			points = shapely.points([(lng, lat) for lat, lng in latlngs])
 			# crs = geo.estimate_utm_crs()
@@ -82,6 +84,11 @@ async def main() -> None:
 		type=Path,
 		help='Path to load TPG data from, defaults to MAIN_TPG_DATA_PATH environment variable if set. If that is not set and this argument is not given, gets main TPG data.',
 	)
+	argparser.add_argument(
+		'--threshold',
+		type=int,
+		help='Only take into account players who have submitted at least this amount of pics.',
+	)
 	args = argparser.parse_args()
 	path: Path | None = args.path
 	if path:
@@ -90,11 +97,13 @@ async def main() -> None:
 		settings = Settings()
 		rounds = await get_main_tpg_rounds_with_path(settings.main_tpg_data_path)
 
-	stats = stats_for_each_user(rounds)
+	stats = stats_for_each_user(rounds, args.threshold)
 
 	print(stats)
 	# I should make these paths configurable but I didn't and haven't, and should
-	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values('furthest_distance')
+	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values(
+		'furthest_distance'
+	)
 	antipoint_stats['antipoint'] = antipoint_stats['antipoint'].map(format_point)
 	antipoint_stats.to_csv('/tmp/antipoint_stats.csv', index=False)
 	stats.to_csv('/tmp/stats.csv', index=False)
