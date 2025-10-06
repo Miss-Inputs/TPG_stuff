@@ -46,6 +46,7 @@ Things to help figure out where to actually go in real life so you can have a be
 ### Other stats
 
 - Custom travel map: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
+- Furthest away points from anyone: Find points that are as far away as possible from any submission by anyone.
 - Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
 - Most used pics: Finds pics that are used multiple times in TPG (or in a TPG data file).
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
