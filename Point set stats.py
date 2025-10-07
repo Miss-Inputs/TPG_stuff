@@ -9,6 +9,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import geopandas
 import pandas
 import shapely
 from aiohttp import ClientSession
@@ -19,6 +20,7 @@ from travelpygame.util import (
 	get_centroid,
 	get_closest_point_index,
 	get_point_antipodes,
+	output_geodataframe,
 	try_set_index_name_col,
 )
 
@@ -30,14 +32,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def print_furthest_point(
-	geo: 'GeoSeries', initial: shapely.Point, session: ClientSession
-):
+async def print_furthest_point(geo: 'GeoSeries', initial: shapely.Point, session: ClientSession):
 	points = geo.to_numpy()
 	furthest_point, dist = find_furthest_point(points, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
 	closest_index, _ = get_closest_point_index(furthest_point, points)
-	print(f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}')
+	print(
+		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
+	)
 
 
 async def print_average_points(geo: 'GeoSeries', session: ClientSession):
@@ -90,6 +92,9 @@ async def main() -> None:
 	argparser.add_argument(
 		'--uniqueness-path', type=Path, help='Optionally output uniqueness of each pic to here'
 	)
+	argparser.add_argument(
+		'--antipodes-path', type=Path, help='Optionally output antipodes of each pic to here'
+	)
 
 	args = argparser.parse_args()
 	gdf = await load_points_async(
@@ -109,6 +114,12 @@ async def main() -> None:
 	geo = gdf.geometry
 
 	antipoints = get_point_antipodes(geo)
+	if args.antipodes_path:
+		antipodes_gdf = geopandas.GeoDataFrame(
+			{'name': geo.index.to_list()}, geometry=antipoints, crs=geo.crs
+		)
+		print(antipodes_gdf)
+		await asyncio.to_thread(output_geodataframe, antipodes_gdf, args.antipodes_path, index=False)
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon)
