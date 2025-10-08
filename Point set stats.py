@@ -7,7 +7,7 @@ import asyncio
 import logging
 from argparse import ArgumentParser
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 import geopandas
 import pandas
@@ -20,19 +20,19 @@ from travelpygame.util import (
 	get_centroid,
 	get_closest_point_index,
 	get_point_antipodes,
+	get_projected_crs,
 	output_geodataframe,
 	try_set_index_name_col,
 )
 
 from lib.format_utils import describe_point
 
-if TYPE_CHECKING:
-	from geopandas import GeoSeries
-
 logger = logging.getLogger(__name__)
 
 
-async def print_furthest_point(geo: 'GeoSeries', initial: shapely.Point, session: ClientSession):
+async def print_furthest_point(
+	geo: geopandas.GeoSeries, initial: shapely.Point, session: ClientSession
+):
 	points = geo.to_numpy()
 	furthest_point, dist = find_furthest_point(points, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
@@ -42,15 +42,16 @@ async def print_furthest_point(geo: 'GeoSeries', initial: shapely.Point, session
 	)
 
 
-async def print_average_points(geo: 'GeoSeries', session: ClientSession):
+async def print_average_points(
+	geo: geopandas.GeoSeries, mp: shapely.MultiPoint, projected_crs: Any, session: ClientSession
+):
 	points = geo.to_numpy()
 	circ = circular_mean_points(points)
 	print('Circular mean point:', await describe_point(circ, session, include_coords=True))
 	closest_index, dist = get_closest_point_index(circ, points)
 	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
 
-	mp = shapely.MultiPoint(points)
-	centroid = get_centroid(mp)
+	centroid = get_centroid(mp, projected_crs, geo.crs)
 	print('Centroid of all points:', await describe_point(centroid, session, include_coords=True))
 	closest_index, dist = get_closest_point_index(centroid, points)
 	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
@@ -85,6 +86,12 @@ async def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 	argparser.add_argument(
+		'--projected-crs',
+		'--metric-crs',
+		'--metres-crs',
+		help='Projected coordinate reference system to use for some operations, autodetect if not specified',
+	)
+	argparser.add_argument(
 		'--name-col',
 		help='Force a specific column label for the name of each point, otherwise autodetect',
 	)
@@ -94,6 +101,12 @@ async def main() -> None:
 	)
 	argparser.add_argument(
 		'--antipodes-path', type=Path, help='Optionally output antipodes of each pic to here'
+	)
+	argparser.add_argument(
+		'--convex-hull-path', type=Path, help='Optionally output convex hull of all pics to here'
+	)
+	argparser.add_argument(
+		'--concave-hull-path', type=Path, help='Optionally output convex hull of all pics to here'
 	)
 
 	args = argparser.parse_args()
@@ -110,8 +123,19 @@ async def main() -> None:
 		gdf = gdf.to_crs('wgs84')
 
 	gdf = gdf.set_index(args.name_col) if args.name_col else try_set_index_name_col(gdf)
-
 	geo = gdf.geometry
+	projected_crs = args.projected_crs
+	if not projected_crs:
+		projected_crs = get_projected_crs(gdf)
+
+	mp = shapely.MultiPoint(geo.to_numpy())
+	if args.convex_hull_path:
+		# We will only compute it if we're outputting it, since there's not really a nice way to display it, and we don't do anything else with it
+		convex_hull = shapely.convex_hull(mp)
+		geopandas.GeoSeries([convex_hull], crs=gdf.crs).to_file(args.convex_hull_path)
+	if args.concave_hull_path:
+		concave_hull = shapely.concave_hull(mp)
+		geopandas.GeoSeries([concave_hull], crs=gdf.crs).to_file(args.concave_hull_path)
 
 	antipoints = get_point_antipodes(geo)
 	if args.antipodes_path:
@@ -119,13 +143,15 @@ async def main() -> None:
 			{'name': geo.index.to_list()}, geometry=antipoints, crs=geo.crs
 		)
 		print(antipodes_gdf)
-		await asyncio.to_thread(output_geodataframe, antipodes_gdf, args.antipodes_path, index=False)
+		await asyncio.to_thread(
+			output_geodataframe, antipodes_gdf, args.antipodes_path, index=False
+		)
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon)
 
 	async with ClientSession() as sesh:
-		await print_average_points(geo, sesh)
+		await print_average_points(geo, mp, projected_crs, sesh)
 		await print_furthest_point(geo, get_centroid(antipoints_mp), sesh)
 
 	closest, uniqueness_ = get_uniqueness(geo)
