@@ -18,7 +18,7 @@ from travelpygame.util import (
 	circular_mean_points,
 	format_distance,
 	get_centroid,
-	get_closest_point_index,
+	get_closest_index,
 	get_point_antipodes,
 	get_projected_crs,
 	output_geodataframe,
@@ -36,7 +36,7 @@ async def print_furthest_point(
 	points = geo.to_numpy()
 	furthest_point, dist = find_furthest_point(points, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
-	closest_index, _ = get_closest_point_index(furthest_point, points)
+	closest_index, _ = get_closest_index(furthest_point, points)
 	print(
 		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
 	)
@@ -48,12 +48,12 @@ async def print_average_points(
 	points = geo.to_numpy()
 	circ = circular_mean_points(points)
 	print('Circular mean point:', await describe_point(circ, session, include_coords=True))
-	closest_index, dist = get_closest_point_index(circ, points)
+	closest_index, dist = get_closest_index(circ, points)
 	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
 
 	centroid = get_centroid(mp, projected_crs, geo.crs)
 	print('Centroid of all points:', await describe_point(centroid, session, include_coords=True))
-	closest_index, dist = get_closest_point_index(centroid, points)
+	closest_index, dist = get_closest_index(centroid, points)
 	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
 
 

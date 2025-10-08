@@ -20,7 +20,7 @@ from travelpygame.new_pic_eval import (
 from travelpygame.util import (
 	format_distance,
 	format_point,
-	get_closest_point_index,
+	get_closest_index,
 	load_points,
 	output_geodataframe,
 	try_set_index_name_col,
@@ -40,7 +40,7 @@ def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataF
 				raise TypeError(
 					f'new points contained {type(new_point)} at {index} instead of Point'
 				)
-			closest_index, distance = get_closest_point_index(new_point, points_geom)
+			closest_index, distance = get_closest_index(new_point, points_geom)
 			closest = points.index[closest_index]
 			rows.append(
 				{
