@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING, Any
 
 import pyproj
 import shapely
-from shapely import MultiPolygon, Polygon, ops
+from shapely import MultiPolygon, Point, Polygon, ops
 from travelpygame.util import (
 	detect_cat_cols,
 	format_area,
 	format_distance,
 	format_point,
+	get_extreme_corner_points,
+	get_extreme_points,
 	get_polygons,
 	get_projected_crs,
 	get_transform_methods,
@@ -33,22 +35,33 @@ def print_point_info(
 	gdf: 'geopandas.GeoDataFrame',
 	metric_poly: MultiPolygon | Polygon,
 	metric_point: shapely.Point,
-	metric_to_wgs84: Any,
+	metric_to_wgs84: Any | None,
 ):
-	point = ops.transform(metric_to_wgs84, metric_point)
-	print(f'\n{name.capitalize()}:', format_point(point))
-	subset = gdf[gdf.contains(point)].drop(
+	point = (
+		metric_point if metric_to_wgs84 is None else ops.transform(metric_to_wgs84, metric_point)
+	)
+	print(f'{name.capitalize()}:', format_point(point))
+	# Ah, whoops, you don't necessarily want contains() here because that doesn't include points right on the boundary of a polygon
+	subset = gdf[gdf.intersects(point)].drop(
 		columns=['area', gdf.active_geometry_name or 'geometry'], errors='ignore'
 	)
 	if subset.empty:
 		metric_nearest = ops.nearest_points(metric_point, metric_poly)[1]
-		nearest = ops.transform(metric_to_wgs84, metric_nearest)
+		if metric_nearest == metric_point:
+			# Give up
+			return
+		nearest = (
+			metric_nearest
+			if metric_to_wgs84 is None
+			else ops.transform(metric_to_wgs84, metric_nearest)
+		)
 		print(f'Closest in area to {name}:', format_point(nearest))
-		subset = gdf[gdf.contains(nearest)].drop(
+		subset = gdf[gdf.intersects(nearest)].drop(
 			columns=['area', gdf.active_geometry_name or 'geometry'], errors='ignore'
 		)
 		if subset.empty:
 			print('huh?? nearest_points returned something not actually in the thing')
+			return
 	info = [f'{col_name}: {_join_unique(col)}' for col_name, col in subset.items() if not col.empty]
 	if info:
 		print('\t' + '\t'.join(info))
@@ -89,6 +102,20 @@ def print_projected_things(
 	print('Longest distance inside convex hull:', format_distance(max_convex_dist))
 	convex_centroid = convex_hull.centroid
 	print_point_info('convex hull centroid', gdf, poly, convex_centroid, metric_to_wgs84)
+
+	multipoly = MultiPolygon(get_polygons(gdf))
+	extremes = get_extreme_points(
+		multipoly, gdf.crs, find_centre_points=True, force_non_contained_centre_points=True
+	)
+	for name, point in extremes.items():
+		assert isinstance(name, str), f'name is {type(name)}'
+		assert isinstance(point, Point), f'point is {type(point)}'
+		print_point_info(name, gdf, multipoly, point, None)
+	extremes = get_extreme_corner_points(poly, None, is_already_projected=True)
+	for name, point in extremes.items():
+		assert isinstance(name, str), f'name is {type(name)}'
+		assert isinstance(point, Point), f'point is {type(point)}'
+		print_point_info(name, gdf, poly, point, metric_to_wgs84)
 
 
 def print_cat_stats(
