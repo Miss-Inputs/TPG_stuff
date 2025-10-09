@@ -16,6 +16,7 @@ from aiohttp import ClientSession
 from travelpygame import find_furthest_point, get_uniqueness, load_points_async
 from travelpygame.util import (
 	circular_mean_points,
+	format_dataframe,
 	format_distance,
 	get_centroid,
 	get_closest_index,
@@ -159,8 +160,7 @@ async def main() -> None:
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
 	if args.uniqueness_path:
 		await asyncio.to_thread(uniqueness.to_csv, args.uniqueness_path)
-	uniqueness['uniqueness'] = uniqueness['uniqueness'].map(format_distance)
-	print(uniqueness)
+	print(format_dataframe(uniqueness, ('uniqueness',)))
 
 
 if __name__ == '__main__':

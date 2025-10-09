@@ -13,8 +13,7 @@ from shapely import Point
 from travelpygame import Round, get_main_tpg_rounds_with_path, load_rounds, output_geodataframe
 from travelpygame.submission_comparison import find_next_highest_placing
 from travelpygame.util import (
-	format_distance,
-	format_point,
+	format_dataframe,
 	format_xy,
 	geod_distance_and_bearing,
 	wgs84_geod,
@@ -124,11 +123,11 @@ def main() -> None:
 		else:
 			df.to_csv(output_path)
 
-	for col in ('distance', 'rival_distance', 'diff'):
-		df[col] = df[col].map(format_distance)
-	if project_forward:
-		df['forward'] = df['forward'].map(format_point)
-	print(df)
+	print(
+		format_dataframe(
+			df, ('distance', 'rival_distance', 'diff'), ('forward',) if project_forward else ()
+		)
+	)
 
 
 if __name__ == '__main__':

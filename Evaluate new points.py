@@ -118,9 +118,7 @@ def eval_with_targets(
 		points, new_points, targets, use_haversine=use_haversine
 	)
 	diffs = diffs.sort_values('mean', ascending=False)
-	for c in ('total', 'best', 'mean'):
-		diffs[c] = diffs[c].map(format_distance)
-	print(diffs)
+	print(format_dataframe(diffs, ('total', 'best', 'mean')))
 
 
 def eval_with_rounds(
