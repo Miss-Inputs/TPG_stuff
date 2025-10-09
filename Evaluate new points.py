@@ -3,6 +3,7 @@
 
 import logging
 from argparse import ZERO_OR_MORE, ArgumentParser, BooleanOptionalAction
+from operator import attrgetter
 from pathlib import Path
 
 import geopandas
@@ -11,13 +12,18 @@ from pandas import Index, RangeIndex
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame import load_rounds
 from travelpygame.best_pics import get_worst_point
 from travelpygame.new_pic_eval import (
 	find_if_new_pics_better,
+	find_improvements_in_round,
 	find_new_pics_better_individually,
 	load_points_or_rounds,
+	new_distance_rank,
 )
+from travelpygame.submission_comparison import compare_player_in_round
 from travelpygame.util import (
+	format_dataframe,
 	format_distance,
 	format_point,
 	get_closest_index,
@@ -56,8 +62,8 @@ def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataF
 
 
 def get_where_pics_better(
-	points: geopandas.GeoDataFrame,
-	new_points: geopandas.GeoDataFrame,
+	points: geopandas.GeoSeries,
+	new_points: geopandas.GeoSeries,
 	targets: geopandas.GeoDataFrame,
 	*,
 	use_haversine: bool = True,
@@ -87,7 +93,9 @@ def eval_with_targets(
 		)
 
 	if find_if_any_pics_better:
-		better = get_where_pics_better(points, new_points, targets, use_haversine=use_haversine)
+		better = get_where_pics_better(
+			points.geometry, new_points.geometry, targets, use_haversine=use_haversine
+		)
 		print('Number of times each pic was better (with all new pics at once):')
 		print(better['new_best'].value_counts())
 		if output_path:
@@ -115,6 +123,89 @@ def eval_with_targets(
 	print(diffs)
 
 
+def eval_with_rounds(
+	current_points: geopandas.GeoSeries,
+	new_points: geopandas.GeoSeries,
+	rounds_path: Path,
+	name: str,
+	output_path: Path | None,
+	*,
+	use_haversine: bool = False,
+):
+	rounds = load_rounds(rounds_path)
+	rounds.sort(key=attrgetter('number'))
+
+	rows = []
+	for r in rounds:
+		current_diff = compare_player_in_round(r, name, use_haversine=use_haversine)
+		if current_diff is None:
+			# We already won the round or didn't submit in in the first place
+			continue
+		# First see what just time travel would do, with current pics instead of the actual submission at the time
+		distance = None
+		current_best = format_point(current_diff.player_pic)
+		current_best_index, current_distance = get_closest_index(
+			r.target, current_points.to_numpy()
+		)
+		if current_distance < current_diff.player_distance:
+			current_best = current_points.index[current_best_index]
+			print(
+				f'Round {r.name} would already be improved by {current_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
+			)
+			distance = current_distance
+			if current_distance < current_diff.rival_distance:
+				print(
+					f'This would also improve our placing, beating {current_diff.rival} at {format_point(current_diff.rival_pic)}, going from {current_diff.player_placing} to {new_distance_rank(current_distance, r)}'
+				)
+
+		old_rank = (
+			current_diff.player_placing if distance is None else new_distance_rank(distance, r)
+		)
+		for improvement in find_improvements_in_round(
+			r, name, new_points, distance, use_haversine=use_haversine
+		):
+			new_rank = new_distance_rank(improvement.new_distance, r)
+			if new_rank == old_rank:
+				# Can happen if the new pic won't help any more than something from current_points would
+				continue
+			row = {
+				'round': r.name,
+				'old_pic': current_best,
+				'old_rank': f'{old_rank}/{current_diff.round_num_players}',
+				'rival': current_diff.rival,
+				'rival_pic': format_point(current_diff.rival_pic),
+				'new_pic': improvement.new_location_name,
+				'new_dist': improvement.new_distance,
+				'new_rank': f'{new_rank}/{current_diff.round_num_players}',
+				'rank_diff': old_rank - new_rank,
+				'amount': improvement.amount
+				if distance is None
+				else distance - improvement.new_distance,
+			}
+			rows.append(row)
+
+	df = pandas.DataFrame(rows)
+	df = df.dropna(how='all', axis='columns')
+	if output_path:
+		df.to_csv(output_path, index=False)
+	print(format_dataframe(df.drop(columns='rival_pic'), ('new_dist', 'amount')))
+
+	groupby = df.groupby('new_pic', sort=False)
+	grouped = pandas.DataFrame(
+		{
+			'num_improved': groupby.size(),
+			'total_rank_diff': groupby['rank_diff'].sum(),
+			'mean_rank_diff': groupby['rank_diff'].mean(),
+			'max_rank_diff': groupby['rank_diff'].max(),
+			'total_diff': groupby['amount'].sum(),
+			'mean_diff': groupby['amount'].mean(),
+			'max_diff': groupby['amount'].max(),
+		}
+	)
+	grouped = grouped.sort_values('total_diff', ascending=False)
+	print(format_dataframe(grouped, ('total_diff', 'mean_diff', 'max_diff')))
+
+
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
@@ -133,6 +224,23 @@ def main() -> None:
 		nargs=ZERO_OR_MORE,
 		type=Path,
 		help='Test against locations or rounds loaded from this path (geojson/csv/ods/etc or submission tracker kml/kmz)',
+	)
+	argparser.add_argument(
+		'--rounds-path',
+		'--data-path',
+		type=Path,
+		help='Test against TPG data loaded from this path to see what rounds could have been improved',
+	)
+	argparser.add_argument(
+		'--rounds-output-path',
+		type=Path,
+		help='Optionally save results of finding improvements in previous TPG rounds to this file',
+	)
+	argparser.add_argument(
+		'--name',
+		'--player-name',
+		type=str,
+		help='With --rounds-path, your name as it appears in the TPG data, otherwise results may be nonsensical',
 	)
 	argparser.add_argument(
 		'--distances-output-path',
@@ -186,6 +294,15 @@ def main() -> None:
 			args.targets,
 			args.output_path,
 			find_if_any_pics_better=args.find_if_any_pics_better,
+			use_haversine=args.use_haversine,
+		)
+	if args.rounds_path:
+		eval_with_rounds(
+			points.geometry,
+			new_points.geometry,
+			args.rounds_path,
+			args.name,
+			args.rounds_output_path,
 			use_haversine=args.use_haversine,
 		)
 
