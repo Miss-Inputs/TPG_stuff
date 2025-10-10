@@ -160,7 +160,7 @@ async def main() -> None:
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
 	if args.uniqueness_path:
 		await asyncio.to_thread(uniqueness.to_csv, args.uniqueness_path)
-	print(format_dataframe(uniqueness, ('uniqueness',)))
+	print(format_dataframe(uniqueness, 'uniqueness'))
 
 
 if __name__ == '__main__':

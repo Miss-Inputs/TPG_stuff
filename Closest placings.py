@@ -125,7 +125,7 @@ def main() -> None:
 
 	print(
 		format_dataframe(
-			df, ('distance', 'rival_distance', 'diff'), ('forward',) if project_forward else ()
+			df, ('distance', 'rival_distance', 'diff'), 'forward' if project_forward else None
 		)
 	)
 
