@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Generate some stats for all the locations from a file. May need a better name.
-
-Note that this is extremely under construction."""
+"""Generate some stats for all the locations from a file."""
 
 import asyncio
 import logging
@@ -14,14 +12,21 @@ import pandas
 import shapely
 from aiohttp import ClientSession
 from travelpygame import find_furthest_point, get_uniqueness, load_points_async
+from travelpygame.stats import get_total_uniqueness
 from travelpygame.util import (
 	circular_mean_points,
+	fix_x_coord,
+	fix_y_coord,
 	format_dataframe,
 	format_distance,
+	format_point,
 	get_centroid,
 	get_closest_index,
+	get_distances,
+	get_extreme_corners_of_point_set,
 	get_point_antipodes,
 	get_projected_crs,
+	mean_points,
 	output_geodataframe,
 	try_set_index_name_col,
 )
@@ -43,19 +48,61 @@ async def print_furthest_point(
 	)
 
 
+async def print_point(
+	geo: geopandas.GeoSeries, point: shapely.Point, name: str, session: ClientSession
+):
+	print(f'{name}:', await describe_point(point, session, include_coords=True))
+	distances = get_distances(point, geo)
+	if point not in geo:
+		closest_index = distances.argmin().item()
+		dist = distances[closest_index]
+		closest = geo.index[closest_index]
+		print(f'Closest to: {closest}, {format_distance(dist)} away')
+	furthest_index = distances.argmax().item()
+	furthest_dist = distances[furthest_index]
+	furthest = geo.index[furthest_index]
+	print(f'Furthest from: {furthest}, {format_distance(furthest_dist)} away')
+	print()
+
+
 async def print_average_points(
 	geo: geopandas.GeoSeries, mp: shapely.MultiPoint, projected_crs: Any, session: ClientSession
 ):
-	points = geo.to_numpy()
-	circ = circular_mean_points(points)
-	print('Circular mean point:', await describe_point(circ, session, include_coords=True))
-	closest_index, dist = get_closest_index(circ, points)
-	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
+	circ = circular_mean_points(geo)
+	await print_point(geo, circ, 'Circular mean point', session)
+	mean = mean_points(geo)
+	await print_point(geo, mean, 'Mean point', session)
 
 	centroid = get_centroid(mp, projected_crs, geo.crs)
-	print('Centroid of all points:', await describe_point(centroid, session, include_coords=True))
-	closest_index, dist = get_closest_index(centroid, points)
-	print(f'Closest to: {geo.index[closest_index]}, {format_distance(dist)} away')
+	await print_point(geo, centroid, 'Centroid of all points', session)
+	centroid_distances = get_distances(centroid, geo)
+	print(f'Total distance from centroid: {format_distance(centroid_distances.sum())}')
+	print(f'Mean distance from centroid: {format_distance(centroid_distances.mean())}')
+
+
+async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession):
+	west, south, east, north = geo.total_bounds
+
+	westmost = geo[geo.x == west]
+	eastmost = geo[geo.x == east]
+	southmost = geo[geo.y == south]
+	northmost = geo[geo.y == north]
+	print('Westmost point(s):', ', '.join(westmost.index), f'({west})')
+	print('Eastmost point(s):', ', '.join(eastmost.index), f'({east})')
+	print('Southmost point(s):', ', '.join(southmost.index), f'({south})')
+	print('Northmost point(s):', ', '.join(northmost.index), f'({north})')
+	print()
+
+	centre_x = fix_x_coord((west + east) / 2)
+	centre_y = fix_y_coord((south + north) / 2)
+	await print_point(geo, shapely.Point(centre_x, centre_y), 'Centre of extremes', session)
+
+	nw, ne, se, sw = get_extreme_corners_of_point_set(geo)
+	print(f'Northwestmost point: {nw}')
+	print(f'Northeastmost point: {ne}')
+	print(f'Southeastmost point: {se}')
+	print(f'Southwestmost point: {sw}')
+	print()
 
 
 async def main() -> None:
@@ -124,10 +171,18 @@ async def main() -> None:
 		gdf = gdf.to_crs('wgs84')
 
 	gdf = gdf.set_index(args.name_col) if args.name_col else try_set_index_name_col(gdf)
+	if isinstance(gdf.index, pandas.RangeIndex):
+		gdf.index = pandas.Index(gdf.geometry.map(format_point))
+
 	geo = gdf.geometry
+	print(f'{geo.size} points')
 	projected_crs = args.projected_crs
 	if not projected_crs:
 		projected_crs = get_projected_crs(gdf)
+		if projected_crs:
+			print(f'Autodetected CRS: {projected_crs.name} {projected_crs.srs}')
+		else:
+			print('Unable to autodetect CRS, this will result in using a generic one')
 
 	mp = shapely.MultiPoint(geo.to_numpy())
 	if args.convex_hull_path:
@@ -149,9 +204,10 @@ async def main() -> None:
 		)
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
-	assert isinstance(antihull, shapely.Polygon)
+	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
 
 	async with ClientSession() as sesh:
+		await print_extreme_points(geo, sesh)
 		await print_average_points(geo, mp, projected_crs, sesh)
 		await print_furthest_point(geo, get_centroid(antipoints_mp), sesh)
 
@@ -161,6 +217,17 @@ async def main() -> None:
 	if args.uniqueness_path:
 		await asyncio.to_thread(uniqueness.to_csv, args.uniqueness_path)
 	print(format_dataframe(uniqueness, 'uniqueness'))
+
+	total_uniqueness = get_total_uniqueness(geo)
+	avg_uniqueness = total_uniqueness / (geo.size - 1)
+	print(
+		format_dataframe(
+			pandas.DataFrame(
+				{'total_uniqueness': total_uniqueness, 'avg_uniqueness': avg_uniqueness}
+			),
+			('total_uniqueness', 'avg_uniqueness'),
+		)
+	)
 
 
 if __name__ == '__main__':
