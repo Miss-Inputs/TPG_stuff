@@ -44,7 +44,7 @@ async def _random_single_point_in_poly(
 			gdf, seed, use_tqdm=True, desc='Finding point inside poly', unit='attempt'
 		)
 		point = shapely.ops.transform(to_wgs84.transform, raw_point) if to_wgs84 else raw_point
-		print(format_point(point))
+		print(format_point(point, None))
 		if value_cols:
 			data = _get_point_data(raw_point, gdf, value_cols)
 			for k, v in data.items():
@@ -102,7 +102,7 @@ async def _random_points_in_poly(
 				rows.append({'point': point})
 
 			if print_each_point:
-				tqdm.write(f'{i}: {format_point(point)} {desc}')
+				tqdm.write(f'{i}: {format_point(point, None)} {desc}')
 	if stats:
 		for col, values in total_data.items():
 			counter = Counter(values)
