@@ -43,7 +43,7 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 	return hull, area, perimeter
 
 
-def stats_for_each_user(rounds: list[Round], threshold: int | None = None):
+def stats_for_each_user(rounds: list[Round], threshold: int | None = None) -> pandas.DataFrame:
 	per_user = get_submissions_per_user(rounds)
 	data = {}
 	with tqdm(per_user.items(), 'Calculating stats', unit='player') as t:

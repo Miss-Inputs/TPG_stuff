@@ -68,7 +68,7 @@ def print_point_info(
 
 
 def print_projected_things(
-	gdf: 'geopandas.GeoDataFrame', poly: MultiPolygon | Polygon, metric_to_wgs84: Any
+	gdf: 'geopandas.GeoDataFrame', poly: MultiPolygon | Polygon, metric_to_wgs84: Any, metric_crs: Any,
 ):
 	# poly is assumed to already be in a metric CRS at this point
 	centroid = poly.centroid
@@ -111,11 +111,11 @@ def print_projected_things(
 		assert isinstance(name, str), f'name is {type(name)}'
 		assert isinstance(point, Point), f'point is {type(point)}'
 		print_point_info(name, gdf, multipoly, point, None)
-	extremes = get_extreme_corner_points(poly, None, is_already_projected=True)
+	extremes = get_extreme_corner_points(multipoly, gdf.crs, metric_crs=metric_crs)
 	for name, point in extremes.items():
 		assert isinstance(name, str), f'name is {type(name)}'
 		assert isinstance(point, Point), f'point is {type(point)}'
-		print_point_info(name, gdf, poly, point, metric_to_wgs84)
+		print_point_info(name, gdf, multipoly, point, None)
 
 
 def print_cat_stats(
@@ -232,7 +232,7 @@ def main() -> None:  # noqa: C901 #your face is too complex!
 		metric_poly = MultiPolygon(polygons)
 
 	metric_to_wgs84 = get_transform_methods(metric_crs, 'wgs84')[0]
-	print_projected_things(gdf, metric_poly, metric_to_wgs84)
+	print_projected_things(gdf, metric_poly, metric_to_wgs84, metric_crs)
 
 
 if __name__ == '__main__':
