@@ -21,10 +21,16 @@ from travelpygame.new_pic_eval import (
 	load_points_or_rounds,
 	new_distance_rank,
 )
-from travelpygame.submission_comparison import compare_player_in_round
+from travelpygame.submission_comparison import (
+	SubmissionDifference,
+	compare_player_in_round,
+	find_new_next_highest_distance,
+)
 from travelpygame.util import (
+	find_first_geom_index,
 	format_dataframe,
 	format_distance,
+	format_ordinal,
 	format_point,
 	get_closest_index,
 	load_points,
@@ -128,6 +134,13 @@ def eval_with_targets(
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
 
 
+def _get_point_name(current_points: geopandas.GeoSeries, current_diff: SubmissionDifference):
+	index = find_first_geom_index(current_points, current_diff.player_pic)
+	if isinstance(index, str):
+		return index
+	return current_diff.player_pic_description
+
+
 def eval_with_rounds(
 	current_points: geopandas.GeoSeries,
 	new_points: geopandas.GeoSeries,
@@ -147,8 +160,10 @@ def eval_with_rounds(
 			# We already won the round or didn't submit in in the first place
 			continue
 		# First see what just time travel would do, with current pics instead of the actual submission at the time
+		# The variable names kind of suck, sorry
 		distance = None
-		current_best = format_point(current_diff.player_pic)
+		current_best = _get_point_name(current_points, current_diff)
+
 		current_best_index, current_distance = get_closest_index(
 			r.target, current_points.to_numpy()
 		)
@@ -159,13 +174,34 @@ def eval_with_rounds(
 			)
 			distance = current_distance
 			if current_distance < current_diff.rival_distance:
+				new_rank = new_distance_rank(current_distance, r)
+				rival_desc = current_diff.rival_pic_description or format_point(
+					current_diff.rival_pic
+				)
 				print(
-					f'This would also improve our placing, beating {current_diff.rival} at {format_point(current_diff.rival_pic)}, going from {current_diff.player_placing} to {new_distance_rank(current_distance, r)}'
+					f'This would also improve our placing, beating {current_diff.rival} at {rival_desc} ({format_distance(current_diff.rival_distance)}), going from {format_ordinal(current_diff.player_placing)} to {format_ordinal(new_rank)}'
+				)
+				# Now we need a new rival
+				# Unless we just won the round
+				if new_rank == 1:
+					continue
+				new_current_point = current_points[current_best]
+				current_diff = find_new_next_highest_distance(
+					r,
+					name,
+					new_current_point,
+					current_distance,
+					new_rank,
+					current_best,
+					use_haversine=use_haversine,
+				)
+				assert current_diff, (
+					'current_diff is now None, which should never happen as we already checked if new_rank was 1'
 				)
 
-		old_rank = (
-			current_diff.player_placing if distance is None else new_distance_rank(distance, r)
-		)
+		old_rank = current_diff.player_placing
+		old_desc = current_best or format_point(current_diff.player_pic)
+		rival_desc = current_diff.rival_pic_description or format_point(current_diff.rival_pic)
 		for improvement in find_improvements_in_round(
 			r, name, new_points, distance, use_haversine=use_haversine
 		):
@@ -175,17 +211,16 @@ def eval_with_rounds(
 				continue
 			row = {
 				'round': r.name,
-				'old_pic': current_best,
+				'old_pic': old_desc,
 				'old_rank': f'{old_rank}/{current_diff.round_num_players}',
 				'rival': current_diff.rival,
-				'rival_pic': format_point(current_diff.rival_pic),
+				'rival_pic': rival_desc,
+				'rival_dist': current_diff.rival_distance,
 				'new_pic': improvement.new_location_name,
 				'new_dist': improvement.new_distance,
 				'new_rank': f'{new_rank}/{current_diff.round_num_players}',
 				'rank_diff': old_rank - new_rank,
-				'amount': improvement.amount
-				if distance is None
-				else distance - improvement.new_distance,
+				'amount': current_diff.player_distance - improvement.new_distance,
 			}
 			rows.append(row)
 
@@ -193,7 +228,7 @@ def eval_with_rounds(
 	df = df.dropna(how='all', axis='columns')
 	if output_path:
 		df.to_csv(output_path, index=False)
-	print(format_dataframe(df.drop(columns='rival_pic'), ('new_dist', 'amount')))
+	print(format_dataframe(df.drop(columns='rival_pic'), ('new_dist', 'rival_dist', 'amount')))
 
 	groupby = df.groupby('new_pic', sort=False)
 	grouped = pandas.DataFrame(
