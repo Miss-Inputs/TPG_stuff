@@ -97,7 +97,12 @@ def eval_with_targets(
 			points.geometry, new_points.geometry, targets, use_haversine=use_haversine
 		)
 		print('Number of times each pic was better (with all new pics at once):')
-		print(better['new_best'].value_counts())
+		print(
+			better['new_best']
+			.value_counts(sort=False)
+			.reindex(new_points.index, fill_value=0)
+			.sort_values(ascending=False)
+		)
 		if output_path:
 			better.to_csv(output_path)
 
@@ -117,6 +122,8 @@ def eval_with_targets(
 	diffs = find_new_pics_better_individually(
 		points, new_points, targets, use_haversine=use_haversine
 	)
+	not_used = ', '.join(new_points.index.difference(diffs.index))
+	print(f'Never better: {not_used}')
 	diffs = diffs.sort_values('mean', ascending=False)
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
 
@@ -200,6 +207,8 @@ def eval_with_rounds(
 			'max_diff': groupby['amount'].max(),
 		}
 	)
+	not_used = ', '.join(frozenset(new_points.index).difference(groupby.groups))
+	print(f'Not used: {not_used}')
 	grouped = grouped.sort_values('total_diff', ascending=False)
 	print(format_dataframe(grouped, ('total_diff', 'mean_diff', 'max_diff')))
 
@@ -257,7 +266,9 @@ def main() -> None:
 		help='Use haversine for distances, defaults to true',
 		default=True,
 	)
-	argparser.add_argument('--output-path', type=Path)
+	argparser.add_argument(
+		'--output-path', type=Path, help='Optional path to save improved distances to targets'
+	)
 	# TODO: Option for new_points to just be one point
 	# TODO: lat/lng/blah column name options
 	args = argparser.parse_args()
@@ -284,7 +295,7 @@ def main() -> None:
 	distances = distances.drop(columns='coords')
 
 	if args.distances_output_path:
-		output_geodataframe(distances, args.output_path, index=False)
+		output_geodataframe(distances, args.distances_output_path, index=False)
 	if args.targets:
 		eval_with_targets(
 			points,
