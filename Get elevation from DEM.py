@@ -3,6 +3,7 @@ import logging
 from argparse import ArgumentParser
 from pathlib import Path
 
+import pyproj
 import rasterio
 import shapely
 from numpy.ma import masked
@@ -18,7 +19,9 @@ def main() -> None:
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
 	)
 	argparser.add_argument('dem_path', type=Path, help='Path to raster file (.tiff, etc)')
-	argparser.add_argument('output_path', type=Path, help='Path to write a file with the results')
+	argparser.add_argument(
+		'output_path', type=Path, nargs='?', help='Path to write a file with the results'
+	)
 
 	argparser.add_argument(
 		'--lat-column',
@@ -52,20 +55,21 @@ def main() -> None:
 	)
 	data = {}
 	with rasterio.open(args.dem_path) as dem:
-		coords = {}
-		for index, geom in gdf.geometry.items():
-			if not isinstance(geom, shapely.Point):
-				# TODO: Handle more gracefully
-				raise TypeError(type(geom))
-			coords[index] = (geom.x, geom.y)
-		data = {
-			index: None if values[0] is masked else values[0]
-			for index, values in zip(
-				coords.keys(), dem.sample(tqdm(coords.values()), masked=True), strict=True
-			)
-		}
+		print('Bands:', dem.count)
+		dem_crs = pyproj.CRS(dem.crs)
+		print('CRS:', dem_crs)
+		print('Upper left:', dem.transform * (0, 0))
+		print('Lower right:', dem.transform * (dem.width, dem.height))
+		
+		coords = shapely.get_coordinates(gdf.geometry)
+		data = [
+			None if values[0] is masked else values[0]
+			for values in dem.sample(tqdm(coords), masked=True)
+		]
 	gdf['elevation'] = data
-	output_geodataframe(gdf, args.output_path, index=False)
+	if args.output_path:
+		output_geodataframe(gdf, args.output_path, index=False)
+	print(gdf)
 
 
 if __name__ == '__main__':
