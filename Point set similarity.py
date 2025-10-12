@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Get distances between point set(s)."""
 
+import asyncio
 import logging
 from argparse import ArgumentParser, Namespace
 from argparse import _ArgumentGroup as ArgumentGroup
@@ -9,7 +10,9 @@ from pathlib import Path
 
 import pandas
 import pyproj
+from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame import get_submissions_per_user_with_path
 from travelpygame.point_set_stats import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
@@ -26,6 +29,8 @@ from travelpygame.util import (
 	load_points,
 	maybe_set_index_name_col,
 )
+
+from lib.settings import Settings
 
 logger = logging.getLogger(Path(__file__).stem)
 
@@ -147,11 +152,24 @@ def compare_two_paths(
 		)
 
 
+def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None):
+	per_user = asyncio.run(get_submissions_per_user_with_path(subs_path))
+	out = []
+	for name, point_set in per_user.items():
+		if skipped and name in skipped:
+			continue
+		if isinstance(point_set, pandas.RangeIndex):
+			point_set.index = pandas.Index(point_set.map(format_point))  # pyright: ignore[reportAttributeAccessIssue]
+		out.append(point_set)
+	return out
+
+
 def compare_one_to_many(
 	left_path: Path,
 	right_paths: list[Path],
 	args: Namespace,
 	method: PointSetDistanceMethodType | None,
+	subs_path: Path | None,
 ):
 	left = load_and_validate(
 		left_path,
@@ -161,26 +179,33 @@ def compare_one_to_many(
 		args.name_col_left,
 		unheadered=args.unheadered_left,
 	)
+	if right_paths:
+		point_sets = [load_and_validate(path) for path in right_paths]
+	else:
+		point_sets = get_subs_per_user(subs_path, {args.player_name})
+
 	rows = {}
-	for path in right_paths:
-		right = load_and_validate(path)
-		row = {}
-		if method:
-			diff, dist, closest_left, closest_right = get_point_set_distance(left, right, method)
-			row['closest_distance'] = dist
-			row['closest_left'] = closest_left
-			row['closest_right'] = closest_right
-			row['dissimilarity'] = diff
-		else:
-			for meth in PointSetDistanceMethod:
+	with tqdm(point_sets, 'Comparing point sets', unit='point set') as t:
+		for point_set in t:
+			row = {}
+			if method:
 				diff, dist, closest_left, closest_right = get_point_set_distance(
-					left, right, meth, use_tqdm=False
+					left, point_set, method
 				)
 				row['closest_distance'] = dist
 				row['closest_left'] = closest_left
 				row['closest_right'] = closest_right
-				row[meth.name] = diff
-		rows[right.name or path.stem] = row
+				row['dissimilarity'] = diff
+			else:
+				for meth in PointSetDistanceMethod:
+					diff, dist, closest_left, closest_right = get_point_set_distance(
+						left, point_set, meth, use_tqdm=False
+					)
+					row['closest_distance'] = dist
+					row['closest_left'] = closest_left
+					row['closest_right'] = closest_right
+					row[meth.name] = diff
+			rows[point_set.name] = row
 	df = pandas.DataFrame.from_dict(rows, 'index')
 	diff_cols = df.columns[~df.columns.str.startswith('closest_')]
 	print(format_dataframe(df, 'closest_distance', number_cols=diff_cols))
@@ -221,8 +246,18 @@ def main() -> None:
 	right_group.add_argument(
 		'right_path',
 		type=Path,
-		nargs='+',
+		nargs='*',
 		help='Path to right point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
+	)
+	left_group.add_argument(
+		'--player-name',
+		help='The name (Discord display name) of the left data, so you can exclude yourself from being similar to yourself',
+	)
+	argparser.add_argument(
+		'--subs-path',
+		'--submissions-path',
+		type=Path,
+		help='Path to file to load submissions per player from (can be a TPG data file), or the value of the SUBS_PER_USER_PATH by default. If not set, loads from API',
 	)
 
 	methods = get_distance_method_combinations(one_name_per_method=True)
@@ -237,11 +272,18 @@ def main() -> None:
 
 	args = argparser.parse_args()
 	method = methods[args.method] if args.method else None
+
+	subs_path = args.subs_path
+	if not subs_path:
+		settings = Settings()
+		subs_path = settings.subs_per_user_path or settings.main_tpg_data_path
+
 	right_paths = args.right_path
 	if len(right_paths) == 1:
+		# TODO: Mayhaps allow using a player name as argument and getting submissions
 		compare_two_paths(args.left_path, right_paths[0], args, method)
 	else:
-		compare_one_to_many(args.left_path, right_paths, args, method)
+		compare_one_to_many(args.left_path, right_paths, args, method, subs_path)
 
 
 if __name__ == '__main__':
