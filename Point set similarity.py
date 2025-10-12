@@ -172,6 +172,7 @@ def compare_one_to_many(
 	args: Namespace,
 	method: PointSetDistanceMethodType | None,
 	subs_path: Path | None,
+	output_path: Path | None,
 ):
 	left = load_and_validate(
 		left_path,
@@ -195,7 +196,7 @@ def compare_one_to_many(
 			row = {}
 			if method:
 				diff, dist, closest_left, closest_right = get_point_set_distance(
-					left, point_set, method
+					left, point_set, method, use_tqdm=False
 				)
 				row['closest_distance'] = dist
 				row['closest_left'] = closest_left
@@ -213,7 +214,16 @@ def compare_one_to_many(
 			rows[point_set.name] = row
 	df = pandas.DataFrame.from_dict(rows, 'index')
 	diff_cols = df.columns[~df.columns.str.startswith('closest_')]
-	print(format_dataframe(df, 'closest_distance', number_cols=diff_cols))
+	print(
+		format_dataframe(
+			df.sort_values('closest_distance' if method is None else 'dissimilarity'),
+			'closest_distance',
+			number_cols=diff_cols,
+		)
+	)
+	if output_path:
+		df.to_csv(output_path)
+
 	if method is None:
 		closest_by_method = df[diff_cols].idxmin(axis='index')
 		min_diff_by_method = df[diff_cols].min(axis='index')
@@ -223,9 +233,9 @@ def compare_one_to_many(
 			format_dataframe(
 				pandas.DataFrame(
 					{
-						'closest': closest_by_method,
+						'most_similar': closest_by_method,
 						'min_diff': min_diff_by_method,
-						'furthest': furthest_by_method,
+						'least_similar': furthest_by_method,
 						'max_diff': max_diff_by_method,
 					}
 				),
@@ -270,6 +280,9 @@ def main() -> None:
 		type=int,
 		help='Only include players with at least this amount of unique submissions',
 	)
+	argparser.add_argument(
+		'--output-path', '--out-path', type=Path, help='Path to write results to CSV'
+	)
 
 	methods = get_distance_method_combinations(one_name_per_method=True)
 	argparser.add_argument(
@@ -294,7 +307,7 @@ def main() -> None:
 		# TODO: Mayhaps allow using a player name as argument and getting submissions
 		compare_two_paths(args.left_path, right_paths[0], args, method)
 	else:
-		compare_one_to_many(args.left_path, right_paths, args, method, subs_path)
+		compare_one_to_many(args.left_path, right_paths, args, method, subs_path, args.output_path)
 
 
 if __name__ == '__main__':
