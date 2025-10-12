@@ -12,7 +12,7 @@ import pandas
 import shapely
 from aiohttp import ClientSession
 from travelpygame import find_furthest_point, get_uniqueness, load_points_async
-from travelpygame.stats import get_total_uniqueness
+from travelpygame.point_set_stats import get_total_uniqueness
 from travelpygame.util import (
 	circular_mean_points,
 	fix_x_coord,
@@ -123,7 +123,7 @@ async def main() -> None:
 		'--lng-column',
 		'--longitude-column',
 		dest='lng_col',
-		help='Force a specific column label for latitude, defaults to autodetected',
+		help='Force a specific column label for longitude, defaults to autodetected',
 	)
 	argparser.add_argument(
 		'--unheadered',
