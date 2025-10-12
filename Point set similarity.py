@@ -152,13 +152,15 @@ def compare_two_paths(
 		)
 
 
-def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None):
+def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None, threshold: int | None):
 	per_user = asyncio.run(get_submissions_per_user_with_path(subs_path))
 	out = []
 	for name, point_set in per_user.items():
 		if skipped and name in skipped:
 			continue
-		if isinstance(point_set, pandas.RangeIndex):
+		if threshold and point_set.size < threshold:
+			continue
+		if isinstance(point_set.index, pandas.RangeIndex):
 			point_set.index = pandas.Index(point_set.map(format_point))  # pyright: ignore[reportAttributeAccessIssue]
 		out.append(point_set)
 	return out
@@ -182,11 +184,14 @@ def compare_one_to_many(
 	if right_paths:
 		point_sets = [load_and_validate(path) for path in right_paths]
 	else:
-		point_sets = get_subs_per_user(subs_path, {args.player_name})
+		point_sets = get_subs_per_user(
+			subs_path, {args.player_name, *(args.exclude_player or ())}, args.threshold
+		)
 
 	rows = {}
 	with tqdm(point_sets, 'Comparing point sets', unit='point set') as t:
 		for point_set in t:
+			t.set_postfix(name=point_set.name)
 			row = {}
 			if method:
 				diff, dist, closest_left, closest_right = get_point_set_distance(
@@ -247,7 +252,7 @@ def main() -> None:
 		'right_path',
 		type=Path,
 		nargs='*',
-		help='Path to right point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
+		help='Path to right point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc). If this is multiple, compares left_path to all sets. If not specified, compares left_path to every other TPG player.',
 	)
 	left_group.add_argument(
 		'--player-name',
@@ -258,6 +263,12 @@ def main() -> None:
 		'--submissions-path',
 		type=Path,
 		help='Path to file to load submissions per player from (can be a TPG data file), or the value of the SUBS_PER_USER_PATH by default. If not set, loads from API',
+	)
+	argparser.add_argument('--exclude-player', nargs='*', help='Exclude player(s) by name')
+	argparser.add_argument(
+		'--threshold',
+		type=int,
+		help='Only include players with at least this amount of unique submissions',
 	)
 
 	methods = get_distance_method_combinations(one_name_per_method=True)
