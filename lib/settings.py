@@ -16,5 +16,7 @@ class Settings(BaseSettings, extra='allow'):
 	"""Path to ADM_3.gpkg from GADM, for anything that might use subdivision borders etc"""
 	main_tpg_data_path: Path | None = None
 	"""Path to save data from main TPG as JSON"""
+	subs_per_user_path: Path | None = None
+	"""Path to save submissions per user as GeoJSON/etc"""
 	tpg_wrapped_output_path: Path | None = None
 	"""Folder to save TPG wrapped to"""

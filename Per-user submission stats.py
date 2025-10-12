@@ -9,15 +9,10 @@ import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from travelpygame import (
-	Round,
-	find_furthest_point,
-	get_main_tpg_rounds_with_path,
-	get_submissions_per_user,
-	load_rounds_async,
-)
+from travelpygame import find_furthest_point, get_submissions_per_user_with_path
 from travelpygame.util import (
 	circular_mean_points,
+	format_dataframe,
 	format_point,
 	geod_distance,
 	get_centroid,
@@ -43,25 +38,26 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 	return hull, area, perimeter
 
 
-def stats_for_each_user(rounds: list[Round], threshold: int | None = None) -> pandas.DataFrame:
-	per_user = get_submissions_per_user(rounds)
+def stats_for_each_user(
+	per_user: dict[str, geopandas.GeoSeries], threshold: int | None = None
+) -> pandas.DataFrame:
+	if threshold:
+		per_user = {name: points for name, points in per_user.items() if points.size >= threshold}
 	data = {}
 	with tqdm(per_user.items(), 'Calculating stats', unit='player') as t:
-		for name, latlngs in t:
+		for name, points in t:
 			t.set_postfix(name=name)
-			if threshold and len(latlngs) < threshold:
-				continue
 			# TODO: These should all be parameters whether to calculate each particular stat or not
-			points = shapely.points([(lng, lat) for lat, lng in latlngs])
 			# crs = geo.estimate_utm_crs()
 			# Using that for get_centroid seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
-			all_points_mp = shapely.MultiPoint(points)
+			all_points = points.to_numpy()
+			all_points_mp = shapely.MultiPoint(all_points)
 			hull = concave_hull_of_user(all_points_mp)
 			furthest_point, furthest_distance = find_furthest_point(
-				points, max_iter=1000, use_tqdm=False
+				all_points, max_iter=1000, use_tqdm=False
 			)
 			stats = {
-				'count': len(points),
+				'count': points.size,
 				'average_point': circular_mean_points(points),
 				'centroid': get_centroid(all_points_mp),
 				'antipoint': furthest_point,
@@ -73,7 +69,7 @@ def stats_for_each_user(rounds: list[Round], threshold: int | None = None) -> pa
 			data[name] = stats
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
-	return df.sort_values('concave_hull_area', ascending=False)
+	return df.sort_values('concave_hull_area', ascending=False, ignore_index=True)
 
 
 async def main() -> None:
@@ -82,7 +78,7 @@ async def main() -> None:
 		'path',
 		nargs='?',
 		type=Path,
-		help='Path to load TPG data from, defaults to MAIN_TPG_DATA_PATH environment variable if set. If that is not set and this argument is not given, gets main TPG data.',
+		help='Path to load submissions from, if this is not specified will try the SUBS_PER_USER_PATH environment variable if set, or if that is not set then MAIN_TPG_DATA_FILE.',
 	)
 	argparser.add_argument(
 		'--threshold',
@@ -91,15 +87,21 @@ async def main() -> None:
 	)
 	args = argparser.parse_args()
 	path: Path | None = args.path
-	if path:
-		rounds = await load_rounds_async(path)
-	else:
+	if not path:
 		settings = Settings()
-		rounds = await get_main_tpg_rounds_with_path(settings.main_tpg_data_path)
+		path = settings.subs_per_user_path or settings.main_tpg_data_path
+	subs = await get_submissions_per_user_with_path(path)
 
-	stats = stats_for_each_user(rounds, args.threshold)
+	stats = stats_for_each_user(subs, args.threshold)
 
-	print(stats)
+	print(
+		format_dataframe(
+			stats,
+			distance_cols=('concave_hull_perimeter', 'furthest_distance'),
+			point_cols=('centroid', 'average_point', 'antipoint'),
+			area_cols='concave_hull_area',
+		)
+	)
 	# I should make these paths configurable but I didn't and haven't, and should
 	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values(
 		'furthest_distance'
