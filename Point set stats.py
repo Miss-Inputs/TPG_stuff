@@ -4,10 +4,12 @@
 import asyncio
 import logging
 from argparse import ArgumentParser
+from collections.abc import Collection
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import geopandas
+import numpy
 import pandas
 import shapely
 from aiohttp import ClientSession
@@ -33,11 +35,29 @@ from travelpygame.util import (
 
 from lib.format_utils import describe_point
 
+if TYPE_CHECKING:
+	from shapely.geometry.base import BaseGeometry
+
 logger = logging.getLogger(__name__)
 
 
+async def print_furthest_point_from_poly(
+	geo: geopandas.GeoSeries,
+	points: Collection[shapely.Point],
+	poly: 'BaseGeometry',
+	session: ClientSession,
+	name: str = 'polygon',
+):
+	furthest_point, dist = find_furthest_point(points, polygon=poly)
+	desc = await describe_point(furthest_point, session, include_coords=True)
+	closest_index, _ = get_closest_index(furthest_point, points)
+	print(
+		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
+	)
+
+
 async def print_furthest_point(
-	geo: geopandas.GeoSeries, initial: shapely.Point, session: ClientSession
+	geo: geopandas.GeoSeries, mp: shapely.MultiPoint, initial: shapely.Point, session: ClientSession
 ):
 	points = geo.to_numpy()
 	furthest_point, dist = find_furthest_point(points, initial)
@@ -47,21 +67,37 @@ async def print_furthest_point(
 		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
 	)
 
+	await print_furthest_point_from_poly(geo, points, mp.envelope, session, 'own bounding box')
+	await print_furthest_point_from_poly(geo, points, mp.convex_hull, session, 'own convex hull')
+	await print_furthest_point_from_poly(
+		geo, points, shapely.concave_hull(mp), session, 'own concave hull'
+	)
+
 
 async def print_point(
-	geo: geopandas.GeoSeries, point: shapely.Point, name: str, session: ClientSession
+	geo: geopandas.GeoSeries,
+	point: shapely.Point,
+	name: str,
+	session: ClientSession,
+	*,
+	get_median: bool = False,
 ):
 	print(f'{name}:', await describe_point(point, session, include_coords=True))
-	distances = get_distances(point, geo)
+	distances = pandas.Series(get_distances(point, geo), index=geo.index).sort_values()
 	if point not in geo:
-		closest_index = distances.argmin().item()
-		dist = distances[closest_index]
-		closest = geo.index[closest_index]
+		dist = distances.iloc[0]
+		closest = distances.index[0]
 		print(f'Closest to: {closest}, {format_distance(dist)} away')
-	furthest_index = distances.argmax().item()
-	furthest_dist = distances[furthest_index]
-	furthest = geo.index[furthest_index]
+	furthest_dist = distances.iloc[-1]
+	furthest = distances.index[-1]
 	print(f'Furthest from: {furthest}, {format_distance(furthest_dist)} away')
+	if get_median:
+		median_index = distances.size // 2
+		median = distances.iloc[median_index]
+		print(
+			f'Point at median distance: {distances.index[median_index]}, {format_distance(median)} away'
+		)
+
 	print()
 
 
@@ -72,6 +108,11 @@ async def print_average_points(
 	await print_point(geo, circ, 'Circular mean point', session)
 	mean = mean_points(geo)
 	await print_point(geo, mean, 'Mean point', session)
+
+	coords = shapely.get_coordinates(geo)
+	median_coords = numpy.median(coords, axis=0)
+	median = shapely.Point(fix_x_coord(median_coords[0]), fix_y_coord(median_coords[1]))
+	await print_point(geo, median, 'Median point', session)
 
 	centroid = get_centroid(mp, projected_crs, geo.crs)
 	await print_point(geo, centroid, 'Centroid of all points', session)
@@ -209,7 +250,7 @@ async def main() -> None:
 	async with ClientSession() as sesh:
 		await print_extreme_points(geo, sesh)
 		await print_average_points(geo, mp, projected_crs, sesh)
-		await print_furthest_point(geo, get_centroid(antipoints_mp), sesh)
+		await print_furthest_point(geo, mp, get_centroid(antipoints_mp), sesh)
 
 	closest, uniqueness_ = get_uniqueness(geo)
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
