@@ -248,12 +248,32 @@ def compare_one_to_many(
 		)
 
 
+def to_graph(
+	df: pandas.DataFrame,
+	source_col: str | None,
+	dest_col: str,
+	weight_col: str | None,
+	output_path: Path,
+):
+	with output_path.open('wt', encoding='utf8') as f:
+		f.write('digraph "" {\n')
+		for index, row in df.iterrows():
+			source = str(index if source_col is None else row[source_col]).replace('"', '\\"')
+			dest = str(row[dest_col]).replace('"', '\\"')
+			line = f'"{source}" -> "{dest}"'
+			if weight_col:
+				line += f' [weight={row[weight_col]}]'
+			f.write(f'{line};\n')
+		f.write('}')
+
+
 def compare_all(
 	args: Namespace,
 	method: PointSetDistanceMethodType | None,
 	subs_path: Path | None,
 	raw_output_path: Path | None,
 	output_path: Path | None,
+	graph_output_path: Path | None,
 ):
 	point_sets = get_subs_per_user(
 		subs_path, {args.player_name, *(args.exclude_player or ())}, args.threshold
@@ -299,6 +319,8 @@ def compare_all(
 
 	df = pandas.DataFrame.from_dict(rows, 'index')
 	df = df.sort_values('mean similarity')
+	if graph_output_path:
+		to_graph(df, None, 'most similar', 'most similar amount', graph_output_path)
 	print(df)
 	if output_path:
 		df.to_csv(output_path)
@@ -345,6 +367,12 @@ def main() -> None:
 		'--output-path', '--out-path', type=Path, help='Path to write results to CSV'
 	)
 	argparser.add_argument(
+		'--graph-output-path',
+		'--graph-path',
+		type=Path,
+		help='Path to write graph of most similar players to dot',
+	)
+	argparser.add_argument(
 		'--raw-output-path',
 		type=Path,
 		help='Path to write all scores of all combinations of players to CSV',
@@ -375,7 +403,9 @@ def main() -> None:
 	elif args.left_path:
 		compare_one_to_many(args.left_path, right_paths, args, method, subs_path, args.output_path)
 	else:
-		compare_all(args, method, subs_path, args.raw_output_path, args.output_path)
+		compare_all(
+			args, method, subs_path, args.raw_output_path, args.output_path, args.graph_output_path
+		)
 
 
 if __name__ == '__main__':
