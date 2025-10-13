@@ -2,11 +2,15 @@
 """Get distances between point set(s)."""
 
 import asyncio
+import itertools
 import logging
 from argparse import ArgumentParser, Namespace
 from argparse import _ArgumentGroup as ArgumentGroup
+from collections import defaultdict
 from collections.abc import Hashable
+from operator import itemgetter
 from pathlib import Path
+from statistics import mean
 
 import pandas
 import pyproj
@@ -244,6 +248,62 @@ def compare_one_to_many(
 		)
 
 
+def compare_all(
+	args: Namespace,
+	method: PointSetDistanceMethodType | None,
+	subs_path: Path | None,
+	raw_output_path: Path | None,
+	output_path: Path | None,
+):
+	point_sets = get_subs_per_user(
+		subs_path, {args.player_name, *(args.exclude_player or ())}, args.threshold
+	)
+	method = method or PointSetDistanceMethod.MeanMin
+
+	scores: defaultdict[str, dict[str, float]] = defaultdict(dict)
+	closests: defaultdict[str, dict[str, tuple[float, str, str]]] = defaultdict(dict)
+	for left, right in tqdm(
+		tuple(itertools.combinations(point_sets, 2)), 'Comparing point sets', unit='point set'
+	):
+		score, closest_dist, closest_a, closest_b = get_point_set_distance(
+			left, right, method, use_tqdm=False
+		)
+		scores[left.name][right.name] = scores[right.name][left.name] = score
+		closests[left.name][right.name] = closest_dist, closest_a, closest_b
+		closests[right.name][left.name] = (
+			closest_dist,
+			closest_b,
+			closest_a,
+		)  # That's symmetrical, right? Yeah nah should be
+
+	if raw_output_path:
+		pandas.DataFrame(scores).to_csv(raw_output_path)
+
+	rows = {}
+	for name, other_scores in scores.items():
+		sorted_scores = sorted(other_scores.items(), key=itemgetter(1))
+		most_similar, most_similar_amount = sorted_scores[0]
+		least_similar, least_similar_amount = sorted_scores[-1]
+		closest_to_similar_dist, closest_a, closest_b = closests[name][most_similar]
+		row = {
+			'most similar': most_similar,
+			'most similar amount': most_similar_amount,
+			'closest distance to most similar': closest_to_similar_dist,
+			'closest pic to most similar': closest_a,
+			'closest pic by most similar': closest_b,
+			'least similar': least_similar,
+			'least similar amount': least_similar_amount,
+			'mean similarity': mean(other_scores.values()),
+		}
+		rows[name] = row
+
+	df = pandas.DataFrame.from_dict(rows, 'index')
+	df = df.sort_values('mean similarity')
+	print(df)
+	if output_path:
+		df.to_csv(output_path)
+
+
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	left_group = argparser.add_argument_group(
@@ -255,6 +315,7 @@ def main() -> None:
 	)
 	left_group.add_argument(
 		'left_path',
+		nargs='?',
 		type=Path,
 		help='Path to left point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
 	)
@@ -283,6 +344,11 @@ def main() -> None:
 	argparser.add_argument(
 		'--output-path', '--out-path', type=Path, help='Path to write results to CSV'
 	)
+	argparser.add_argument(
+		'--raw-output-path',
+		type=Path,
+		help='Path to write all scores of all combinations of players to CSV',
+	)
 
 	methods = get_distance_method_combinations(one_name_per_method=True)
 	argparser.add_argument(
@@ -306,8 +372,10 @@ def main() -> None:
 	if len(right_paths) == 1:
 		# TODO: Mayhaps allow using a player name as argument and getting submissions
 		compare_two_paths(args.left_path, right_paths[0], args, method)
-	else:
+	elif args.left_path:
 		compare_one_to_many(args.left_path, right_paths, args, method, subs_path, args.output_path)
+	else:
+		compare_all(args, method, subs_path, args.raw_output_path, args.output_path)
 
 
 if __name__ == '__main__':
