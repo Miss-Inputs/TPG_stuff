@@ -4,55 +4,52 @@
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy
+import pandas
 from shapely import Point
 from tqdm.auto import tqdm
 from travelpygame.util import (
 	find_first_matching_column,
+	first_unique_column_label,
+	format_dataframe,
 	format_distance,
 	format_point,
-	geod_distance_and_bearing,
-	haversine_distance,
+	get_distances,
 	load_points,
-	output_geodataframe,
 )
+from travelpygame.util.pandas_utils import maybe_name_cols
 
 if TYPE_CHECKING:
 	import geopandas
-	import pandas
 
 
 def get_best_pic(
-	dest_row: 'pandas.Series',
+	dest: Point,
+	dest_name: str,
 	sources: 'geopandas.GeoDataFrame',
 	source_name_col: Hashable | None = 'name',
 	*,
 	use_haversine: bool = True,
 ):
-	n = sources.index.size
-	source_lat = sources.geometry.y.to_numpy()
-	source_lng = sources.geometry.x.to_numpy()
-	dest_lat = numpy.repeat(dest_row.geometry.y, n)
-	dest_lng = numpy.repeat(dest_row.geometry.x, n)
-	distances = (
-		haversine_distance(source_lat, source_lng, dest_lat, dest_lng)
-		if use_haversine
-		else geod_distance_and_bearing(source_lat, source_lng, dest_lat, dest_lng)[0]
-	)
-	shortest = numpy.argmin(distances)
-	shortest_dist = distances[shortest]
+	distances = get_distances(dest, sources.geometry, use_haversine=use_haversine)
+	shortest_dist = distances.min()
+	is_closest = distances == shortest_dist
+	closest = sources[is_closest]
+	if closest.index.size > 1:
+		tqdm.write(f'Multiple sources were equally distant to {dest_name}: {closest}')
+
 	if source_name_col:
-		shortest_name = sources[source_name_col].iloc[shortest]
+		closest_name = closest[source_name_col].iloc[0]
 	else:
-		shortest_point = sources.geometry[shortest]
-		assert isinstance(shortest_point, Point), (
-			f'shortest_point was {type(shortest_point)}, expected Point'
+		closest_point = closest.geometry.iloc[0]
+		assert isinstance(closest_point, Point), (
+			f'shortest_point was {type(closest_point)}, expected Point'
 		)
-		shortest_name = format_point(shortest_point)
-	return shortest_name, shortest_dist
+		closest_name = format_point(closest_point)
+	return closest_name, shortest_dist
 
 
 def main() -> None:
@@ -61,13 +58,22 @@ def main() -> None:
 		'points', type=Path, help='Path of file with existing points to find the best ones out of'
 	)
 	argparser.add_argument(
-		'target_points', type=Path, help='Path of file with points to find the best distances to'
+		'targets',
+		type=Path,
+		help='Path of file (assumed to have points) to find the best distances to',
 	)
 	argparser.add_argument(
 		'out_path', type=Path, nargs='?', help='Output distances/best pics to a file, optionally'
 	)
 	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
-	# TODO: Also name col arguments would be useful here
+	argparser.add_argument(
+		'--source-name-col',
+		help='Column label in points with the name of each point, or autodetect (it will be okay to not have any such column)',
+	)
+	argparser.add_argument(
+		'--dest-name-col',
+		help='Column label in targets with the name of each point, or autodetect (it will be okay to not have any such column)',
+	)
 	argparser.add_argument(
 		'--threshold',
 		type=float,
@@ -82,33 +88,49 @@ def main() -> None:
 	args = argparser.parse_args()
 
 	sources = load_points(args.points)
-	dests = load_points(args.target_points)
-	source_name_col = find_first_matching_column(sources, ('name', 'desc', 'description'))
+	dests = load_points(args.targets)
+	if not dests.active_geometry_name:
+		raise ValueError('no geometry in dests?')
+	source_name_col = (
+		args.source_name_col
+		or find_first_matching_column(sources, maybe_name_cols)
+		or first_unique_column_label(sources)
+	)
+	dest_name_col = (
+		args.dest_name_col
+		or find_first_matching_column(dests, maybe_name_cols)
+		or first_unique_column_label(dests)
+	)
 
 	best_pics = {}
 	distances = {}
+	names = {}
 	with tqdm(dests.iterrows(), 'Finding best pics', dests.index.size, unit='target') as t:
 		for index, dest_row in t:
-			t.set_postfix(target='index')
+			dest = dest_row[dests.active_geometry_name]
+			name = dest_row[dest_name_col] if dest_name_col else f'{index}: {format_point(dest)}'  # pyright: ignore[reportArgumentType, reportCallIssue]
+			t.set_postfix(target=name)
+			names[index] = name
 			best_pics[index], distances[index] = get_best_pic(
-				dest_row, sources, source_name_col, use_haversine=args.use_haversine
+				dest, name, sources, source_name_col, use_haversine=args.use_haversine
 			)
 
-	dests['best'] = best_pics
-	dests['distance'] = distances
-	dests = dests.sort_values('distance')
+	df = pandas.DataFrame({'dest': names, 'best_pic': best_pics, 'distance': distances})
+	with suppress(ValueError):
+		df = df.set_index('dest', verify_integrity=True)
+	df = df.sort_values('distance')
 
-	print(dests)
-	counts = dests['best'].value_counts()
+	print(format_dataframe(df, 'distance'))
+	counts = df['best_pic'].value_counts()
 	print('Number of times each pic was the best:')
 	print(counts.to_string(header=False, name=False))
-	print('Average distance:', format_distance(dests['distance'].mean()))
+	print('Average distance:', format_distance(df['distance'].mean()))
 
 	if args.out_path:
-		output_geodataframe(dests, args.out_path, index=False)
+		df.to_csv(args.out_path)
 	if args.threshold:
 		threshold: float = args.threshold * 1_000
-		counts = dests[dests['distance'] < threshold]['best'].value_counts()
+		counts = df[df['distance'] < threshold]['best_pic'].value_counts()
 		print(f'Number of times each pic was below {format_distance(threshold)}:', counts)
 
 
