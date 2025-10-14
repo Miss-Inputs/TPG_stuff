@@ -14,7 +14,7 @@ import pandas
 import shapely
 from aiohttp import ClientSession
 from travelpygame import find_furthest_point, get_uniqueness, load_points_async
-from travelpygame.point_set_stats import get_total_uniqueness
+from travelpygame.point_set_stats import find_geometric_median, get_total_uniqueness
 from travelpygame.util import (
 	circular_mean_points,
 	fix_x_coord,
@@ -27,9 +27,11 @@ from travelpygame.util import (
 	get_distances,
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
+	get_polygons,
 	get_projected_crs,
 	mean_points,
 	output_geodataframe,
+	read_geodataframe_async,
 	try_set_index_name_col,
 )
 
@@ -120,6 +122,9 @@ async def print_average_points(
 	print(f'Total distance from centroid: {format_distance(centroid_distances.sum())}')
 	print(f'Mean distance from centroid: {format_distance(centroid_distances.mean())}')
 
+	geo_median = find_geometric_median(geo, centroid)
+	await print_point(geo, geo_median, 'Geometric median', session)
+
 
 async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession):
 	west, south, east, north = geo.total_bounds
@@ -144,6 +149,32 @@ async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession)
 	print(f'Southeastmost point: {se}')
 	print(f'Southwestmost point: {sw}')
 	print()
+
+
+def print_unique_points(geo: geopandas.GeoSeries, uniqueness_path: Path | None):
+	closest, uniqueness_ = get_uniqueness(geo)
+	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
+	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
+	if uniqueness_path:
+		uniqueness.to_csv(uniqueness_path)
+	print(format_dataframe(uniqueness, 'uniqueness'))
+
+	total_uniqueness = get_total_uniqueness(geo)
+	avg_uniqueness = total_uniqueness / (geo.size - 1)
+	print(
+		format_dataframe(
+			pandas.DataFrame(
+				{'total_uniqueness': total_uniqueness, 'avg_uniqueness': avg_uniqueness}
+			),
+			('total_uniqueness', 'avg_uniqueness'),
+		)
+	)
+
+
+async def load_polygons(path: Path):
+	gdf = await read_geodataframe_async(path)
+	polygons = get_polygons(gdf)
+	return shapely.MultiPolygon(polygons) if polygons else None
 
 
 async def main() -> None:
@@ -195,7 +226,12 @@ async def main() -> None:
 		'--convex-hull-path', type=Path, help='Optionally output convex hull of all pics to here'
 	)
 	argparser.add_argument(
-		'--concave-hull-path', type=Path, help='Optionally output convex hull of all pics to here'
+		'--concave-hull-path', type=Path, help='Optionally output concave hull of all pics to here'
+	)
+	argparser.add_argument(
+		'--polygon-path',
+		type=Path,
+		help='Optional path to a file containing polygons to get stats like furthest point in a region or whatever else',
 	)
 
 	args = argparser.parse_args()
@@ -247,28 +283,24 @@ async def main() -> None:
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
 
+	print_unique_points(geo, args.uniqueness_path)
+
 	async with ClientSession() as sesh:
 		await print_extreme_points(geo, sesh)
 		await print_average_points(geo, mp, projected_crs, sesh)
 		await print_furthest_point(geo, mp, get_centroid(antipoints_mp), sesh)
-
-	closest, uniqueness_ = get_uniqueness(geo)
-	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
-	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
-	if args.uniqueness_path:
-		await asyncio.to_thread(uniqueness.to_csv, args.uniqueness_path)
-	print(format_dataframe(uniqueness, 'uniqueness'))
-
-	total_uniqueness = get_total_uniqueness(geo)
-	avg_uniqueness = total_uniqueness / (geo.size - 1)
-	print(
-		format_dataframe(
-			pandas.DataFrame(
-				{'total_uniqueness': total_uniqueness, 'avg_uniqueness': avg_uniqueness}
-			),
-			('total_uniqueness', 'avg_uniqueness'),
-		)
-	)
+		polygon_path: Path | None = args.polygon_path
+		if polygon_path:
+			polygon = await load_polygons(polygon_path)
+			if polygon:
+				await print_furthest_point_from_poly(
+					geo, geo.to_numpy(), polygon, sesh, polygon_path.stem
+				)
+				await print_furthest_point_from_poly(
+					geo, geo.to_numpy(), polygon.envelope, sesh, f'{polygon_path.stem} bounding box'
+				)
+			else:
+				print(f'Could not find any polygons in {polygon_path.stem}')
 
 
 if __name__ == '__main__':
