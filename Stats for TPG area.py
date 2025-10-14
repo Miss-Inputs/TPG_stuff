@@ -68,7 +68,10 @@ def print_point_info(
 
 
 def print_projected_things(
-	gdf: 'geopandas.GeoDataFrame', poly: MultiPolygon | Polygon, metric_to_wgs84: Any, metric_crs: Any,
+	gdf: 'geopandas.GeoDataFrame',
+	poly: MultiPolygon | Polygon,
+	metric_to_wgs84: Any,
+	metric_crs: Any,
 ):
 	# poly is assumed to already be in a metric CRS at this point
 	centroid = poly.centroid
@@ -95,6 +98,7 @@ def print_projected_things(
 	diagonal_dist = shapely.distance(shapely.Point(min_x, min_y), shapely.Point(max_x, max_y))
 	print('Bounding box diagonal distance:', format_distance(diagonal_dist))
 
+	# We don't really need to be doing this in projected space, oh well
 	convex_hull = poly.convex_hull
 	assert isinstance(convex_hull, (Polygon, MultiPolygon)), type(convex_hull)
 	print('Convex hull size:', format_area(convex_hull.area))
@@ -136,7 +140,7 @@ def print_cat_stats(
 		print(areas)
 
 
-def main() -> None:  # noqa: C901 #your face is too complex!
+def main() -> None:
 	argparser = ArgumentParser()
 	argparser.add_argument('path', type=Path, help='Path to geojson/gpkg/etc file')
 	argparser.add_argument(
@@ -176,8 +180,8 @@ def main() -> None:  # noqa: C901 #your face is too complex!
 		print(
 			f'Autodetected metric CRS: {metric_crs.name} {metric_crs.list_authority()} {metric_crs.scope} {metric_crs.remarks}'
 		)
-	cat_cols: list[str] = args.category
 
+	cat_cols: list[str] = args.category
 	if not cat_cols:
 		cat_cols = detect_cat_cols(gdf)
 
@@ -197,17 +201,14 @@ def main() -> None:  # noqa: C901 #your face is too complex!
 		print_cat_stats(gdf, cat_cols)
 
 	if print_invalidity:
-		invalid_reasons = metres.is_valid_reason()
-		invalid_reasons = invalid_reasons[invalid_reasons != 'Valid Geometry']
+		# I don't know why this happens for things which seem perfectly valid
+		invalid_reasons = metres.is_valid_reason().rename('invalid_reason')
+		is_invalid = invalid_reasons != 'Valid Geometry'
+		invalid_reasons = invalid_reasons[is_invalid]
 		if not invalid_reasons.empty:
 			print('Invalid geometries after converting to metres CRS:')
-			print(invalid_reasons)
-			# metres = metres.set_geometry(metres.make_valid())
+			print(is_invalid.to_string())
 			metres = metres.drop(index=invalid_reasons.index)
-	else:
-		is_invalid = ~metres.is_valid
-		if is_invalid.any():
-			metres.loc[is_invalid, 'geometry'] = metres.geometry[is_invalid].make_valid()
 
 	if print_invalidity:
 		coverage_valid = metres.is_valid_coverage()
@@ -219,17 +220,7 @@ def main() -> None:  # noqa: C901 #your face is too complex!
 	else:
 		coverage_valid = False
 
-	geom_types = metres.geom_type
-	if set(geom_types).issubset({'Polygon', 'MultiPolygon'}):
-		metric_poly = metres.union_all('coverage' if coverage_valid else 'unary')
-		if not isinstance(metric_poly, (Polygon, MultiPolygon)):
-			raise TypeError(
-				f'union_all returned {type(metric_poly)} instead of (Multi)Polygon, so this is as far as we go'
-			)
-	else:
-		# Have to do things the hard way then
-		polygons = get_polygons(metres)
-		metric_poly = MultiPolygon(polygons)
+	metric_poly = MultiPolygon(get_polygons(metres))
 
 	metric_to_wgs84 = get_transform_methods(metric_crs, 'wgs84')[0]
 	print_projected_things(gdf, metric_poly, metric_to_wgs84, metric_crs)
