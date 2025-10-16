@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import geopandas
 import shapely
 from geopandas.geoseries import GeoSeries
 from pandas import Index, RangeIndex
@@ -20,7 +21,13 @@ from travelpygame.simulation import (
 	simulate_existing_rounds,
 )
 from travelpygame.tpg_data import get_submissions_per_user_from_path
-from travelpygame.util import format_point, format_xy, read_geodataframe, try_set_index_name_col
+from travelpygame.util import (
+	format_point,
+	format_xy,
+	output_geodataframe,
+	read_geodataframe,
+	try_set_index_name_col,
+)
 
 if TYPE_CHECKING:
 	from geopandas import GeoSeries
@@ -66,7 +73,7 @@ def get_simulation(
 		)
 
 	if targets_path:
-		targets = try_set_index_name_col(load_points(targets_path))
+		targets = load_with_name(targets_path)
 		rounds = {
 			str(index): point
 			for index, point in targets.geometry.items()
@@ -92,6 +99,7 @@ def output_results(
 	name: str | None,
 	rounds_output_path: Path | None,
 	output_path: Path | None,
+	losing_rounds_path: Path | None,
 ):
 	if existing_rounds:
 		for result in new_rounds:
@@ -109,6 +117,18 @@ def output_results(
 	print(player_summary)
 	if output_path:
 		player_summary.to_csv(output_path)
+
+	if losing_rounds_path and name:
+		losing_rounds = [
+			{'name': r.name or format_point(r.target), 'target': r.target}
+			for r in new_rounds
+			if r.submissions[-1].name == name
+		]
+		if losing_rounds:
+			output_geodataframe(
+				geopandas.GeoDataFrame(losing_rounds, geometry='target', crs='wgs84'),
+				losing_rounds_path,
+			)
 
 
 def load_with_name(path: Path | str):
@@ -216,6 +236,11 @@ def main() -> None:
 	output_args.add_argument(
 		'--rounds-output-path', type=Path, help='Output winners/etc of each round here'
 	)
+	output_args.add_argument(
+		'--losing-rounds-path',
+		type=Path,
+		help='With --name, output rounds where that player loses here',
+	)
 
 	player_args = argparser.add_argument_group(
 		'Pics arguments',
@@ -284,7 +309,14 @@ def main() -> None:
 		name = None
 
 	new_rounds = simulation.simulate_rounds()
-	output_results(new_rounds, existing_rounds, name, args.rounds_output_path, args.output_path)
+	output_results(
+		new_rounds,
+		existing_rounds,
+		name,
+		args.rounds_output_path,
+		args.output_path,
+		args.losing_rounds_path,
+	)
 
 
 if __name__ == '__main__':
