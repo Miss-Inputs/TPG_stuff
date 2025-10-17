@@ -7,7 +7,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import geopandas
 import shapely
 from geopandas.geoseries import GeoSeries
 from pandas import Index, RangeIndex
@@ -16,11 +15,12 @@ from travelpygame.random_points import random_point_in_bbox, random_points_in_po
 from travelpygame.simulation import (
 	SimulatedStrategy,
 	Simulation,
+	get_player_podium_or_losing_points,
 	get_player_summary,
 	get_round_summary,
 	simulate_existing_rounds,
 )
-from travelpygame.tpg_data import get_submissions_per_user_from_path
+from travelpygame.tpg_data import get_submissions_per_user_from_path, rounds_to_json
 from travelpygame.util import (
 	format_point,
 	format_xy,
@@ -99,6 +99,7 @@ def output_results(
 	name: str | None,
 	round_summary_path: Path | None,
 	player_summary_path: Path | None,
+	podium_rounds_path: Path | None,
 	losing_rounds_path: Path | None,
 ):
 	if existing_rounds:
@@ -118,17 +119,12 @@ def output_results(
 	if player_summary_path:
 		player_summary.to_csv(player_summary_path)
 
-	if losing_rounds_path and name:
-		losing_rounds = [
-			{'name': r.name or format_point(r.target), 'target': r.target}
-			for r in new_rounds
-			if r.submissions[-1].name == name
-		]
-		if losing_rounds:
-			output_geodataframe(
-				geopandas.GeoDataFrame(losing_rounds, geometry='target', crs='wgs84'),
-				losing_rounds_path,
-			)
+	if name and (podium_rounds_path or losing_rounds_path):
+		podiumming, losing = get_player_podium_or_losing_points(new_rounds, name)
+		if podium_rounds_path:
+			output_geodataframe(podiumming, podium_rounds_path)
+		if losing_rounds_path:
+			output_geodataframe(losing, losing_rounds_path)
 
 
 def load_with_name(path: Path | str):
@@ -231,6 +227,9 @@ def main() -> None:
 		'Output arguments', 'Arguments specifying what is output and where'
 	)
 	output_args.add_argument(
+		'--output-path', type=Path, help='Output simulated rounds as a TPG data file'
+	)
+	output_args.add_argument(
 		'--player-summary-path',
 		'--player-summary-output-path',
 		type=Path,
@@ -242,6 +241,11 @@ def main() -> None:
 		'--round-summary-output-path',
 		type=Path,
 		help='Output winners/etc of each round here',
+	)
+	output_args.add_argument(
+		'--podium-rounds-path',
+		type=Path,
+		help='With --name, output rounds where that player gets podium here',
 	)
 	output_args.add_argument(
 		'--losing-rounds-path',
@@ -317,8 +321,12 @@ def main() -> None:
 		name,
 		args.round_summary_path,
 		args.player_summary_path,
+		args.podium_rounds_path,
 		args.losing_rounds_path,
 	)
+	output_path: Path | None = args.output_path
+	if output_path:
+		output_path.write_text(rounds_to_json(new_rounds), 'utf-8')
 
 
 if __name__ == '__main__':
