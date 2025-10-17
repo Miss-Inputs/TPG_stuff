@@ -31,7 +31,7 @@ Things to get stats for you/your point set, which may be useful, or may be just 
 
 Things to help figure out where to actually go in real life so you can have a better score in Travel Pics Game.
 
-- Closest wins: With your username (and optionally a TPG data file), prints the person one place ahead of you for each round, how much ahead of you they were and in which direction, and optionally what point is that distance in that direction.
+- Closest placings: With your username (and optionally a TPG data file), prints the person one place ahead of you for each round, how much ahead of you they were and in which direction, and optionally what point is that distance in that direction.
 - Evaluate new points: Given a point set, and also another point set for locations you haven't been to yet but are considering, this figures out which points in the new point set would be the most useful in various ways, optionally using a set of targets (which can be yet another point set, or a TPG data file to use the rounds from it) in which case it will find which new points get you closer to a target than your old points.
 
 ### For TPG spinoff runners
@@ -51,6 +51,7 @@ Things to help figure out where to actually go in real life so you can have a be
 - Most used pics: Finds pics that are used multiple times in TPG (or in a TPG data file).
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
 - Plot user submissions: Plots rounds and submissions and arrows from the submission to the round, given TPG data and a player name. NOTE: This currently needs rewriting and also hardcodes some stuff.
+- Point set similarity: Finds similarity between two point sets, or one point set and every other player, or every combination of players (along with everyone's most similar player)
 - Simulate rounds: Re-runs each TPG round or simulates a new one with points from a file or randomly generated, with every user's known pics from TPG data, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
 
 ### Unsorted
