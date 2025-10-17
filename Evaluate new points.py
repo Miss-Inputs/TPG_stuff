@@ -224,11 +224,21 @@ def eval_with_rounds(
 			}
 			rows.append(row)
 
+	if not rows:
+		print(
+			f'You ({name}) would not improve your placements in any rounds with these new pics, sadge (or you were not found as submitting for any of these rounds, make sure --name is correct)'
+		)
+		return
+
 	df = pandas.DataFrame(rows)
 	df = df.dropna(how='all', axis='columns')
 	if output_path:
 		df.to_csv(output_path, index=False)
-	print(format_dataframe(df.drop(columns='rival_pic'), ('new_dist', 'rival_dist', 'amount')))
+	print(
+		format_dataframe(
+			df.drop(columns='rival_pic', errors='ignore'), ('new_dist', 'rival_dist', 'amount')
+		)
+	)
 
 	groupby = df.groupby('new_pic', sort=False)
 	grouped = pandas.DataFrame(
