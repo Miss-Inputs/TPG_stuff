@@ -12,12 +12,7 @@ from geopandas import GeoDataFrame
 from shapely import Point
 from travelpygame import Round, get_main_tpg_rounds_with_path, load_rounds, output_geodataframe
 from travelpygame.submission_comparison import find_next_highest_placing
-from travelpygame.util import (
-	format_dataframe,
-	format_xy,
-	geod_distance_and_bearing,
-	wgs84_geod,
-)
+from travelpygame.util import format_dataframe, format_xy, geod_distance_and_bearing, wgs84_geod
 
 from lib.settings import Settings
 
@@ -42,6 +37,7 @@ def get_closest_placings(
 			'season': r.season,
 			'target': format_xy(r.longitude, r.latitude),
 			'distance': rival_diff.player_distance,
+			'placing': f'{rival_diff.player_placing}/{rival_diff.round_num_players}',
 			'rival': rival_diff.rival,
 			'rival_distance': rival_diff.rival_distance,
 			'diff': rival_diff.distance_diff,
