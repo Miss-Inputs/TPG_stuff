@@ -97,8 +97,8 @@ def output_results(
 	new_rounds: list[Round],
 	existing_rounds: list[Round] | None,
 	name: str | None,
-	rounds_output_path: Path | None,
-	output_path: Path | None,
+	round_summary_path: Path | None,
+	player_summary_path: Path | None,
 	losing_rounds_path: Path | None,
 ):
 	if existing_rounds:
@@ -109,14 +109,14 @@ def output_results(
 
 	round_summary = get_round_summary(new_rounds, name)
 	print(round_summary)
-	if rounds_output_path:
-		round_summary.to_csv(rounds_output_path)
+	if round_summary_path:
+		round_summary.to_csv(round_summary_path)
 
 	# TODO: More detailed stats here, like maybe a whole entire leaderboard
 	player_summary = get_player_summary(new_rounds)
 	print(player_summary)
-	if output_path:
-		player_summary.to_csv(output_path)
+	if player_summary_path:
+		player_summary.to_csv(player_summary_path)
 
 	if losing_rounds_path and name:
 		losing_rounds = [
@@ -200,10 +200,10 @@ def main() -> None:
 		'--random-rounds', type=int, help='If this is specified, generate N random rounds'
 	)
 	target_args.add_argument(
+		'--region',
 		'--random-in-region',
-		nargs=2,
-		metavar=('number_of_points', 'path'),
-		help='If this is specified, it must be two arguments: number of points and path of a file containing geometry to generate random points in',
+		metavar='path',
+		help='With --random-rounds, generate points within a region instead of anywhere in the world',
 	)
 
 	sim_args = argparser.add_argument_group(
@@ -231,10 +231,17 @@ def main() -> None:
 		'Output arguments', 'Arguments specifying what is output and where'
 	)
 	output_args.add_argument(
-		'--output-path', type=Path, help='Output total scores/etc of simulated players here'
+		'--player-summary-path',
+		'--player-summary-output-path',
+		type=Path,
+		help='Output total scores/etc of simulated players here',
 	)
 	output_args.add_argument(
-		'--rounds-output-path', type=Path, help='Output winners/etc of each round here'
+		'--round-summary-path',
+		'--rounds-output-path',
+		'--round-summary-output-path',
+		type=Path,
+		help='Output winners/etc of each round here',
 	)
 	output_args.add_argument(
 		'--losing-rounds-path',
@@ -274,12 +281,7 @@ def main() -> None:
 	points_path: Path | None = args.points_path
 	targets_path: Path | None = args.targets
 	num_random_points: int | None = args.random_rounds
-	random_points = args.random_in_region
-	if random_points:
-		num_random_points = int(random_points[0])
-		region_path = Path(random_points[1])
-	else:
-		region_path = None
+	region_path: Path | None = args.region
 
 	strategy = strategy_choices[args.strategy]
 	if args.custom_scoring:
@@ -313,8 +315,8 @@ def main() -> None:
 		new_rounds,
 		existing_rounds,
 		name,
-		args.rounds_output_path,
-		args.output_path,
+		args.round_summary_path,
+		args.player_summary_path,
 		args.losing_rounds_path,
 	)
 
