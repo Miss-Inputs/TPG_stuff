@@ -165,12 +165,13 @@ def eval_with_rounds(
 		current_best = _get_point_name(current_points, current_diff)
 
 		current_best_index, current_distance = get_closest_index(
-			r.target, current_points.to_numpy()
+			r.target, current_points.to_numpy(), use_haversine=use_haversine
 		)
 		if current_distance < current_diff.player_distance:
+			old_best = current_best
 			current_best = current_points.index[current_best_index]
 			print(
-				f'Round {r.name} would already be improved by {current_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
+				f'Round {r.name} would already be improved by {current_best} over {old_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
 			)
 			distance = current_distance
 			if current_distance < current_diff.rival_distance:
