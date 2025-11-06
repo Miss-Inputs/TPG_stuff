@@ -40,6 +40,7 @@ Things to help figure out where to actually go in real life so you can have a be
 - Distribution stats for TPG area: Displays the total area in metres and percentage that each region (.geojson/.gpkg) occupies in a regional TPG area, for example, the regions file can be official subdivision boundaries from a government agency, and this will show which subdivisions are the biggest in a TPG area.
 - Generate random location: Given a .geojson/.gpkg/etc file containing a TPG area, picks out a random point somewhere in that area, or optionally multiple points, and optionally prints some stats.
 - Round stats: Outputs some stats (e.g. average/central submission, average distance) for each round in a TPG data file that has scores.
+- Score multi-target CSV: Quick and dirty scorer for a TPG spinoff with multiple targets, using a CSV that has lat/lng and also target_lat/target_lng columns.
 - Score submissions: Takes TPG data files or exported submission trackers, calculates distances and scores according to options, saves as a TPG data file containing scores, outputs leaderboards, and prints submission reminders.
 - Stats for TPG area: Prints some stats for a TPG area, such as counts of category columns (can be autodetected from frequencies or manually specified, as most geographical file formats don't store anything that indicates a column is a pandas "category" type), or centroid, representative point, pole of inaccessibility, etc.
 
