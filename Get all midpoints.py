@@ -38,25 +38,33 @@ async def get_row_midpoint(
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path1', type=Path)
-	argparser.add_argument('path2', type=Path)
-	argparser.add_argument('out_path', type=Path, nargs='?')
+	argparser.add_argument(
+		'path2',
+		nargs='?',
+		type=Path,
+		help='If not specified, get midpoints of points in path1 with other points',
+	)
+	argparser.add_argument('--out-path', type=Path)
 	argparser.add_argument(
 		'--reverse-geocode',
 		action='store_true',
 		help='Use reverse geocoding for the name of unnamed points',
 	)
-	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
+	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col, and use "desc" or "name" as the name column
 	args = argparser.parse_args()
 
 	gdf_1 = await load_points_async(args.path1)
-	gdf_2 = await load_points_async(args.path2)
+	if args.path2:
+		gdf_2 = await load_points_async(args.path2)
+		total = gdf_1.index.size * gdf_2.index.size
+		combinations = itertools.product(gdf_1.iterrows(), gdf_2.iterrows())
+	else:
+		combinations = tuple(itertools.combinations(gdf_1.iterrows(), 2))
+		total = len(combinations)
 
 	data = []
-	total = gdf_1.index.size * gdf_2.index.size
 	async with ClientSession() if args.reverse_geocode else nullcontext() as session:
-		for (_index1, row1), (_index2, row2) in tqdm(
-			itertools.product(gdf_1.iterrows(), gdf_2.iterrows()), total=total
-		):
+		for (_index1, row1), (_index2, row2) in tqdm(combinations, total=total):
 			data.append(await get_row_midpoint(row1, row2, session))
 
 	gdf = geopandas.GeoDataFrame(data, crs='wgs84')
