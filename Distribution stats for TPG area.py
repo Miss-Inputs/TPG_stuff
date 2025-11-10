@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from datetime import timedelta
 from pathlib import Path
 from time import perf_counter
 
-from travelpygame.util import format_area, read_geodataframe
+from travelpygame.util import format_area, get_area, read_geodataframe
 
 
 def main() -> None:
@@ -23,6 +23,12 @@ def main() -> None:
 	argparser.add_argument(
 		'--metres-crs',
 		help='Override CRS used for area computations, should be something with metres as the unit',
+	)
+	argparser.add_argument(
+		'--area-from-crs',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Use the metric CRS to calculate the area of polygons instead of the WGS84 geod, defaults to False',
 	)
 
 	args = argparser.parse_args()
@@ -55,8 +61,10 @@ def main() -> None:
 
 	metres_crs = args.metres_crs or gdf.estimate_utm_crs()
 	metres = gdf.to_crs(metres_crs)
-	#TODO: Use wgs84_geod to calculate area instead
-	metres['area'] = metres.area
+
+	gdf['area'] = metres['area'] = (
+		metres.area if args.area_from_crs else gdf.geometry.map(get_area, na_action='ignore')
+	)
 	total_area = metres['area'].sum()
 
 	area_by_region = metres.groupby(name_col, sort=False, dropna=False)['area'].sum()
