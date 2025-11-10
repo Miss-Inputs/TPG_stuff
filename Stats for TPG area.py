@@ -11,6 +11,7 @@ from travelpygame.util import (
 	format_area,
 	format_distance,
 	format_point,
+	get_area,
 	get_extreme_corner_points,
 	get_extreme_points,
 	get_polygons,
@@ -160,6 +161,12 @@ def main() -> None:
 		help='Override CRS used for area computations, should be something with metres as the unit',
 	)
 	argparser.add_argument(
+		'--area-from-crs',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Use the metric CRS to calculate the area of polygons instead of the WGS84 geod, defaults to False',
+	)
+	argparser.add_argument(
 		'--print-invalidity',
 		action=BooleanOptionalAction,
 		default=False,
@@ -193,7 +200,9 @@ def main() -> None:
 			print(invalid_reasons)
 
 	metres = gdf.to_crs(metric_crs)
-	gdf['area'] = metres['area'] = metres.area
+	gdf['area'] = metres['area'] = (
+		metres.area if args.area_from_crs else gdf.geometry.map(get_area, na_action='ignore')
+	)
 	total_area = metres['area'].sum()
 	print('Total area:', format_area(total_area))
 
