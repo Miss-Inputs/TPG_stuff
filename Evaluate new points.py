@@ -92,8 +92,15 @@ def eval_with_targets(
 	"""The function name kinda sucks but if it starts with test_ then Ruff thinks it's a test function and complains about things accordingly"""
 	targets = load_points_or_rounds(target_paths)
 	targets = try_set_index_name_col(targets)
-	if isinstance(targets.index, RangeIndex):
+	is_default_index = isinstance(targets.index, RangeIndex)
+	dupe_geometry = targets.duplicated('geometry', keep=False)
+	if dupe_geometry.any():
+		print('Targets had duplicate geometries, only keeping first of each')
+		print(targets[dupe_geometry])
+		targets = targets.drop_duplicates('geometry')
+	if is_default_index:
 		# Try and get something more descriptive than just the default increasing index
+		# We do the isinstance check before drop_duplicates as that may change it
 		targets.index = Index(
 			[format_point(geo) if isinstance(geo, Point) else str(geo) for geo in targets.geometry]
 		)
@@ -129,7 +136,8 @@ def eval_with_targets(
 		points, new_points, targets, use_haversine=use_haversine
 	)
 	not_used = ', '.join(new_points.index.difference(diffs.index))
-	print(f'Never better: {not_used}')
+	if not_used:
+		print(f'Never better: {not_used}')
 	diffs = diffs.sort_values('mean', ascending=False)
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
 
