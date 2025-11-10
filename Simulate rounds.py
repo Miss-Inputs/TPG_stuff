@@ -186,13 +186,14 @@ def main() -> None:
 
 	target_args = argparser.add_argument_group(
 		'Target arguments', 'Which locations will be the targets of each simulated round'
-	).add_mutually_exclusive_group(required=False)
-	target_args.add_argument(
+	)
+	exclusive_target_args = target_args.add_mutually_exclusive_group(required=False)
+	exclusive_target_args.add_argument(
 		'--targets',
 		type=Path,
 		help='If this path is specified, load points from this file to be used as each round',
 	)
-	target_args.add_argument(
+	exclusive_target_args.add_argument(
 		'--random-rounds', type=int, help='If this is specified, generate N random rounds'
 	)
 	target_args.add_argument(
