@@ -121,9 +121,9 @@ def output_results(
 
 	if name and (podium_rounds_path or losing_rounds_path):
 		podiumming, losing = get_player_podium_or_losing_points(new_rounds, name)
-		if podium_rounds_path:
+		if podium_rounds_path and not podiumming.empty:
 			output_geodataframe(podiumming, podium_rounds_path)
-		if losing_rounds_path:
+		if losing_rounds_path and not losing.empty:
 			output_geodataframe(losing, losing_rounds_path)
 
 
