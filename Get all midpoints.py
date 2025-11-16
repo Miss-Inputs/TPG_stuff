@@ -23,8 +23,8 @@ async def get_row_midpoint(
 	point_2 = row_2.geometry
 	midpoint = get_midpoint(point_1, point_2)
 
-	desc_1 = row_1.get('desc', row_1.get('name', None))
-	desc_2 = row_2.get('desc', row_2.get('name', None))
+	desc_1 = row_1.get('desc', row_1.get('name', row_1.get('location', None)))
+	desc_2 = row_2.get('desc', row_2.get('name', row_2.get('location', None)))
 	if session:
 		desc_1 = await describe_point(point_1, session) if pandas.isna(desc_1) else desc_1
 		desc_2 = await describe_point(point_2, session) if pandas.isna(desc_2) else desc_2
@@ -54,8 +54,10 @@ async def main() -> None:
 	args = argparser.parse_args()
 
 	gdf_1 = await load_points_async(args.path1)
+	gdf_1 = gdf_1.drop_duplicates('geometry')
 	if args.path2:
 		gdf_2 = await load_points_async(args.path2)
+		gdf_2 = gdf_2.drop_duplicates('geometry')
 		total = gdf_1.index.size * gdf_2.index.size
 		combinations = itertools.product(gdf_1.iterrows(), gdf_2.iterrows())
 	else:
