@@ -52,6 +52,14 @@ def main() -> None:
 		default=100,
 	)
 	argparser.add_argument(
+		'--fivek-suffix',
+		'--5k-suffix',
+		dest='fivek_suffix',
+		type=str,
+		help='If loading from kml/kmz, suffix to add to submissions in the tracker to manually mark them as 5Ks',
+		default=' (5K)',
+	)
+	argparser.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
 		help='Use haversine instead of WGS geod for scoring (less accurate as it assumes the earth is a sphere, but more consistent with other TPG things), defaults to True',
@@ -89,7 +97,9 @@ def main() -> None:
 	last_round_num = 0
 	for path in paths:
 		if path.suffix[1:].lower() in {'kml', 'kmz'}:
-			loaded = convert_submission_tracker(path, last_round_num + 1)
+			loaded = convert_submission_tracker(
+				path, last_round_num + 1, fivek_suffix=args.fivek_suffix
+			)
 		else:
 			loaded = load_rounds(path)
 		last_round_num = max(r.number for r in loaded)
