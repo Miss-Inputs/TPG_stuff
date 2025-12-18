@@ -6,7 +6,6 @@ geopandas
 pycountry
 pydantic-settings
 python-dotenv
-pyzstd
 rasterio
 requests
 scikit-learn #not using it yet whoops
