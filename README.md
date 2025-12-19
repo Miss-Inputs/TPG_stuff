@@ -18,7 +18,7 @@ Things to help you actually play the game.
 
 - Get all midpoints: Intended for Team TPG, finds every possible midpoint between all of your points and a teammate's points.
 - Get point set from submissions: Gets all points submitted from a particular player, optionally using a specific TPG data file or getting main TPG data. Useful for getting your own points if you don't have a list already, a teammate's points for Team TPG, or an opponent's points for Gauntlet TPG/TPG League/TPG Tournament/etc.
-- Reverse geocode all points: Given a point set with no or incomplete name/description, uses a Nominatim mirror to find the address for each point, and optionally saves the file to .csv or .geojson or whichever else. (The reverse geocoding is not in travelpygame at this point in time.)
+- Reverse geocode all points: Given a point set with no or incomplete name/description, uses a Nominatim mirror to find the address for each point, and optionally saves the file to .csv or .geojson or whichever else. (The reverse geocoding is not in travelpygame at this point in time, and probably should be.) (The mirror endpoint might not work sometimes.)
 
 ### For TPG players (stats)
 
@@ -37,12 +37,19 @@ Things to help figure out where to actually go in real life so you can have a be
 ### For TPG spinoff runners
 
 - Convert submission tracker: Converts kml/kmz file(s) from a submission tracker (or several, if a season needs multiple trackers) hosted on Google My Maps to a TPG data file, for easier use with everything else.
-- Distribution stats for TPG area: Displays the total area in metres and percentage that each region (.geojson/.gpkg) occupies in a regional TPG area, for example, the regions file can be official subdivision boundaries from a government agency, and this will show which subdivisions are the biggest in a TPG area.
 - Generate random location: Given a .geojson/.gpkg/etc file containing a TPG area, picks out a random point somewhere in that area, or optionally multiple points, and optionally prints some stats.
-- Round stats: Outputs some stats (e.g. average/central submission, average distance) for each round in a TPG data file that has scores.
 - Score multi-target CSV: Quick and dirty scorer for a TPG spinoff with multiple targets, using a CSV that has lat/lng and also target_lat/target_lng columns.
 - Score submissions: Takes TPG data files or exported submission trackers, calculates distances and scores according to options, saves as a TPG data file containing scores, outputs leaderboards, and prints submission reminders.
+
+### For TPG spinoff runners (stats)
+
+- Distribution stats for TPG area: Displays the total area in metres and percentage that each region (.geojson/.gpkg) occupies in a regional TPG area, for example, the regions file can be official subdivision boundaries from a government agency, and this will show which subdivisions are the biggest in a TPG area.
+- Round stats: Outputs some stats (e.g. average/central submission, average distance) for each round in a TPG data file that has scores.
 - Stats for TPG area: Prints some stats for a TPG area, such as counts of category columns (can be autodetected from frequencies or manually specified, as most geographical file formats don't store anything that indicates a column is a pandas "category" type), or centroid, representative point, pole of inaccessibility, etc.
+
+## Stats for predicting future outcomes
+
+- Simulate rounds: Re-runs each TPG round or simulates a new one with points from a file or randomly generated, with every user's known pics from TPG data, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
 
 ### Other stats
 
@@ -53,7 +60,6 @@ Things to help figure out where to actually go in real life so you can have a be
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
 - Plot user submissions: Plots rounds and submissions and arrows from the submission to the round, given TPG data and a player name. NOTE: This currently needs rewriting and also hardcodes some stuff.
 - Point set similarity: Finds similarity between two point sets, or one point set and every other player, or every combination of players (along with everyone's most similar player)
-- Simulate rounds: Re-runs each TPG round or simulates a new one with points from a file or randomly generated, with every user's known pics from TPG data, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
 
 ### Unsorted
 
@@ -67,3 +73,4 @@ Things to help figure out where to actually go in real life so you can have a be
 
 - TPG wrapped.py: Used at the end of season 2 to generate nicely formatted stats for every player, which everyone liked.
 - More TPG stats.py: Some other stats requested by CG for the season 2 award ceremony.
+- Unique areas: Regions that have only had a pic submitted by one person. I think I was planning some spinoff here?
