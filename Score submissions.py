@@ -106,8 +106,14 @@ def main() -> None:
 		rounds += loaded
 	rounds.sort(key=_round_number_getter)
 
+	# TODO: This should load options from the file actually, though for KMZ we would still need a way to override via command line
 	options = ScoringOptions(
-		args.fivek_score, None, None, None, args.world_distance, clip_negative=args.clip_negative
+		fivek_flat_score=args.fivek_score,
+		fivek_bonus=None,
+		rank_bonuses=None,
+		antipode_5k_flat_score=None,
+		world_distance_km=args.world_distance,
+		clip_negative=args.clip_negative,
 	)
 
 	scored_rounds = [
