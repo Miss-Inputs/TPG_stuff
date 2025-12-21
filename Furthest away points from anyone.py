@@ -87,7 +87,7 @@ def main() -> None:
 	all_points = all_submissions.geometry.to_numpy()
 	with tqdm(desc='Finding points') as t:
 		while True:
-			points = numpy.append(all_points, found)  # pyright: ignore[reportArgumentType]
+			points = numpy.append(all_points, numpy.asarray(found))
 			point, distance = find_furthest_point(
 				points, polygon=region, use_tqdm=False, use_haversine=True
 			)
