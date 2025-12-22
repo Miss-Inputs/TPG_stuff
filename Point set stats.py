@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate some stats for all the locations from a file."""
+"""Generate some stats for all the locations from a file, or a user's known submissions."""
 
 import asyncio
 import logging
@@ -13,7 +13,12 @@ import numpy
 import pandas
 import shapely
 from aiohttp import ClientSession
-from travelpygame import find_furthest_point, get_uniqueness, load_points_async
+from travelpygame import (
+	find_furthest_point,
+	get_uniqueness,
+	load_or_fetch_per_player_submissions,
+	load_points_async,
+)
 from travelpygame.point_set_stats import find_geometric_median, get_total_uniqueness
 from travelpygame.util import (
 	circular_mean_points,
@@ -36,6 +41,7 @@ from travelpygame.util import (
 )
 
 from lib.format_utils import describe_point
+from lib.settings import Settings
 
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
@@ -177,12 +183,11 @@ async def load_polygons(path: Path):
 	return shapely.MultiPolygon(polygons) if polygons else None
 
 
-async def main() -> None:
+async def main() -> None:  # noqa: C901 #nah
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path',
-		type=Path,
-		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
 	)
 
 	argparser.add_argument(
@@ -235,13 +240,21 @@ async def main() -> None:
 	)
 
 	args = argparser.parse_args()
-	gdf = await load_points_async(
-		args.path,
-		args.lat_col,
-		args.lng_col,
-		crs=args.crs,
-		has_header=False if args.unheadered else None,
-	)
+	path: str = args.path
+	if path.startswith('username:'):
+		settings = Settings()
+		all_subs = await load_or_fetch_per_player_submissions(
+			settings.subs_per_player_path, settings.main_tpg_data_path
+		)
+		gdf = all_subs[path.removeprefix('username:')]
+	else:
+		gdf = await load_points_async(
+			path,
+			args.lat_col,
+			args.lng_col,
+			crs=args.crs,
+			has_header=False if args.unheadered else None,
+		)
 	assert gdf.crs, 'gdf had no crs, which should never happen'
 	if not gdf.crs.is_geographic:
 		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
