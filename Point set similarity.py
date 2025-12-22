@@ -16,7 +16,7 @@ import pandas
 import pyproj
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import get_submissions_per_user_with_path
+from travelpygame import load_or_fetch_per_player_submissions
 from travelpygame.point_set_stats import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
@@ -157,7 +157,7 @@ def compare_two_paths(
 
 
 def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None, threshold: int | None):
-	per_user = asyncio.run(get_submissions_per_user_with_path(subs_path))
+	per_user = asyncio.run(load_or_fetch_per_player_submissions(subs_path))
 	out = []
 	for name, point_set in per_user.items():
 		if skipped and name in skipped:
@@ -394,7 +394,7 @@ def main() -> None:
 	subs_path = args.subs_path
 	if not subs_path:
 		settings = Settings()
-		subs_path = settings.subs_per_user_path or settings.main_tpg_data_path
+		subs_path = settings.subs_per_player_path
 
 	right_paths = args.right_path
 	if len(right_paths) == 1:

@@ -290,7 +290,13 @@ def main() -> None:
 
 	strategy = strategy_choices[args.strategy]
 	if args.custom_scoring:
-		scoring = ScoringOptions(7500, None, None, None, args.custom_scoring)
+		scoring = ScoringOptions(
+			fivek_flat_score=7500,
+			fivek_bonus=None,
+			rank_bonuses=None,
+			antipode_5k_flat_score=None,
+			world_distance_km=args.custom_scoring,
+		)
 	else:
 		scoring = main_tpg_scoring
 

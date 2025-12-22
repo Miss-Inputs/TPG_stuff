@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Makes a map of areas that are exclusively submitted by one user, for some kind of hypothetical TPG-like strategy game where the goal is to "capture" regions."""
 
+import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import Counter, defaultdict
 from collections.abc import Hashable
@@ -10,7 +11,7 @@ import contextily
 import geopandas
 import pandas
 from matplotlib import pyplot
-from travelpygame.tpg_data import get_submissions_per_user_from_path
+from travelpygame.subs_per_player import load_or_fetch_per_player_submissions
 from travelpygame.util import (
 	first_unique_column_label,
 	output_geodataframe,
@@ -78,7 +79,7 @@ def plot_regions(gdf: geopandas.GeoDataFrame, output_path: Path | None, *, use_c
 	)
 
 	if use_contextily:
-		#This likes to not work when gdf includes the whole world… hrm
+		# This likes to not work when gdf includes the whole world… hrm
 		contextily.add_basemap(ax, crs='EPSG:4326')
 
 	ax.set_axis_off()
@@ -141,21 +142,16 @@ def main() -> None:
 
 	subs_path: Path | None = args.submissions_path
 	if not subs_path:
-		subs_path = Settings().subs_per_user_path
+		subs_path = Settings().subs_per_player_path
 	if not subs_path:
 		raise RuntimeError(
 			'--submissions-path was not set in the environment or provided explicitly'
 		)
 
-	subs_per_user = get_submissions_per_user_from_path(subs_path)
+	subs_per_user = asyncio.run(load_or_fetch_per_player_submissions(subs_path))
 	# Awkwardly convert it back to a single DataFrame
 	subs = pandas.concat(
-		(
-			geopandas.GeoDataFrame(
-				pandas.Series(player, points.index, name='player'), geometry=points
-			)
-			for player, points in subs_per_user.items()
-		),
+		(points.assign(player=player) for player, points in subs_per_user.items()),
 		ignore_index=True,
 	)
 	assert isinstance(subs, geopandas.GeoDataFrame), f'subs was {type(subs)}'

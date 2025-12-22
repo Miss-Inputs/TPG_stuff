@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Gets stats for all players. This is stil a bit of a mess and this docstring isn't even very good."""
 
 import asyncio
 import logging
@@ -9,7 +10,7 @@ import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from travelpygame import find_furthest_point, get_submissions_per_user_with_path
+from travelpygame import find_furthest_point, load_or_fetch_per_player_submissions
 from travelpygame.util import (
 	circular_mean_points,
 	format_dataframe,
@@ -22,7 +23,7 @@ from travelpygame.util import (
 from lib.settings import Settings
 
 
-def concave_hull_of_user(all_points: shapely.MultiPoint):
+def concave_hull_of_player(all_points: shapely.MultiPoint):
 	if len(all_points.geoms) == 1:
 		return None, 0, 0
 	if len(all_points.geoms) == 2:
@@ -38,13 +39,15 @@ def concave_hull_of_user(all_points: shapely.MultiPoint):
 	return hull, area, perimeter
 
 
-def stats_for_each_user(
-	per_user: dict[str, geopandas.GeoSeries], threshold: int | None = None
+def stats_for_each_player(
+	per_player: dict[str, geopandas.GeoSeries], threshold: int | None = None
 ) -> pandas.DataFrame:
 	if threshold:
-		per_user = {name: points for name, points in per_user.items() if points.size >= threshold}
+		per_player = {
+			name: points for name, points in per_player.items() if points.size >= threshold
+		}
 	data = {}
-	with tqdm(per_user.items(), 'Calculating stats', unit='player') as t:
+	with tqdm(per_player.items(), 'Calculating stats', unit='player') as t:
 		for name, points in t:
 			t.set_postfix(name=name)
 			# TODO: These should all be parameters whether to calculate each particular stat or not
@@ -52,7 +55,7 @@ def stats_for_each_user(
 			# Using that for get_centroid seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
 			all_points = points.to_numpy()
 			all_points_mp = shapely.MultiPoint(all_points)
-			hull = concave_hull_of_user(all_points_mp)
+			hull = concave_hull_of_player(all_points_mp)
 			furthest_point, furthest_distance = find_furthest_point(
 				all_points, max_iter=1000, use_tqdm=False
 			)
@@ -78,7 +81,7 @@ async def main() -> None:
 		'path',
 		nargs='?',
 		type=Path,
-		help='Path to load submissions from, if this is not specified will try the SUBS_PER_USER_PATH environment variable if set, or if that is not set then MAIN_TPG_DATA_FILE.',
+		help='Path to load submissions from, if this is not specified will try the SUBS_PER_PLAYER_PATH environment variable if set.',
 	)
 	argparser.add_argument(
 		'--threshold',
@@ -89,10 +92,11 @@ async def main() -> None:
 	path: Path | None = args.path
 	if not path:
 		settings = Settings()
-		path = settings.subs_per_user_path or settings.main_tpg_data_path
-	subs = await get_submissions_per_user_with_path(path)
+		path = settings.subs_per_player_path
+	subs = await load_or_fetch_per_player_submissions(path)
+	all_point_sets = {player: points.geometry for player, points in subs.items()}
 
-	stats = stats_for_each_user(subs, args.threshold)
+	stats = stats_for_each_player(all_point_sets, args.threshold)
 
 	print(
 		format_dataframe(
