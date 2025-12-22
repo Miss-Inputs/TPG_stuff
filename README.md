@@ -26,6 +26,7 @@ Things to get stats for you/your point set, which may be useful, or may be just 
 
 - Get best pic for points: Given a target point set, finds your closest point in your point set for each one.
 - Point set stats: Outputs some info about your point set, such as average/central location, or furthest possible point on the earth.
+- Plot player distances: Plots a map coloured in by best possible distance from a point set.
 
 ### For TPG travellers
 
