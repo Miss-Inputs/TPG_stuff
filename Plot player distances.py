@@ -48,12 +48,6 @@ def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 	argparser.add_argument(
-		'--projected-crs',
-		'--metric-crs',
-		'--metres-crs',
-		help='Projected coordinate reference system to use for some operations, autodetect if not specified',
-	)
-	argparser.add_argument(
 		'--name-col',
 		help='Force a specific column label for the name of each point, otherwise autodetect',
 	)
