@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Plots a map that shows where one player is closer vs where the other is closer."""
+"""Plots a map that shows where one player is closer vs where the other is closer.
+Note: This is probably not the correct algorithm to do this sort of thing, oh well.
+
+"""
 
 import asyncio
 import logging
@@ -101,7 +104,13 @@ async def main() -> None:
 		dest='output_path',
 		help='Location to save map as an image, instead of showing',
 	)
-	# TODO: Options for colour map, marker size, basemap provider, etc
+	argparser.add_argument(
+		'--marker-size',
+		type=float,
+		default=1.0,
+		help='Size of dots on map, defaults to 1.0, you may want to fiddle with this so they overlap enough to not look like dots',
+	)
+	# TODO: Options for colour map, basemap provider, etc
 
 	args = argparser.parse_args()
 
@@ -156,7 +165,7 @@ async def main() -> None:
 		color=gdf['colour'],
 		legend=False,
 		ax=ax,
-		markersize=1,
+		markersize=args.marker_size,
 		alpha=0.3,
 		legend_kwds={'shrink': 0.4},
 	)
