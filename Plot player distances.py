@@ -7,15 +7,14 @@ from pathlib import Path
 
 import contextily
 import geopandas
-import pandas
 from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame import get_best_pic, load_or_fetch_per_player_submissions, load_points
-from travelpygame.util import format_distance, format_point, try_set_index_name_col
+from travelpygame import get_best_pic
+from travelpygame.util import format_distance
 from travelpygame.util.point_construction import get_fixed_grid
 
-from lib.settings import Settings
+from lib.io_utils import load_point_set_from_arg
 
 logger = logging.getLogger(Path(__file__).stem)
 
@@ -24,7 +23,7 @@ def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'points',
-		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
 
 	argparser.add_argument(
@@ -75,39 +74,15 @@ def main() -> None:
 	# TODO: Options for colour map, marker size, basemap provider, etc
 
 	args = argparser.parse_args()
-	path_or_name: str = args.points
-	if path_or_name.startswith('username:'):
-		settings = Settings()
-		all_subs = asyncio.run(
-			load_or_fetch_per_player_submissions(
-				settings.subs_per_player_path, settings.main_tpg_data_path
-			)
+	point_set = asyncio.run(
+		load_point_set_from_arg(
+			args.points, args.lat_col, args.lng_col, args.crs, force_unheadered=args.unheadered
 		)
-		player_points = all_subs[path_or_name.removeprefix('username:')]
-	else:
-		player_points = load_points(
-			path_or_name,
-			args.lat_col,
-			args.lng_col,
-			crs=args.crs,
-			has_header=False if args.unheadered else None,
-		)
-	assert player_points.crs, 'player_points had no crs, which should never happen'
-	if not player_points.crs.is_geographic:
-		logger.warning('player_points had non-geographic CRS %s, converting to WGS84')
-		player_points = player_points.to_crs('wgs84')
-
-	player_points = (
-		player_points.set_index(args.name_col)
-		if args.name_col
-		else try_set_index_name_col(player_points)
 	)
-	if isinstance(player_points.index, pandas.RangeIndex):
-		player_points.index = pandas.Index(player_points.geometry.map(format_point))
 
 	resolution: float = args.resolution
 	if args.limit_grid_to_bbox:
-		min_x, min_y, max_x, max_y = player_points.total_bounds
+		min_x, min_y, max_x, max_y = point_set.gdf.total_bounds
 	else:
 		min_x = -179
 		min_y = -89
@@ -123,7 +98,7 @@ def main() -> None:
 		point_grid.items(), 'Computing distances to points', total=point_grid.size, unit='point'
 	):
 		assert isinstance(point, Point), f'Why is point {index} a {type(point)} and not a Point'
-		best_pic, distance = get_best_pic(player_points, point)
+		best_pic, distance = get_best_pic(point_set.point_array, point)
 		distances[index] = distance
 		best_pics[index] = best_pic
 

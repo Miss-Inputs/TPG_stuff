@@ -12,14 +12,7 @@ import numpy
 import pandas
 import shapely
 from aiohttp import ClientSession
-from travelpygame import (
-	PointSet,
-	find_furthest_point,
-	get_uniqueness,
-	load_or_fetch_per_player_submissions,
-	load_points_async,
-	validate_points,
-)
+from travelpygame import PointSet, find_furthest_point, get_uniqueness
 from travelpygame.point_set_stats import find_geometric_median, get_total_uniqueness
 from travelpygame.util import (
 	circular_mean_xy,
@@ -27,21 +20,18 @@ from travelpygame.util import (
 	fix_y_coord,
 	format_dataframe,
 	format_distance,
-	format_point,
 	geometry_to_file_async,
 	get_centroid,
 	get_closest_index,
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
 	get_polygons,
-	get_projected_crs,
 	output_geodataframe,
 	read_geodataframe_async,
-	try_set_index_name_col,
 )
 
 from lib.format_utils import describe_point
-from lib.settings import Settings
+from lib.io_utils import load_point_set_from_arg
 
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
@@ -184,46 +174,11 @@ async def load_polygons(path: Path):
 	return shapely.MultiPolygon(polygons) if polygons else None
 
 
-async def load_point_set(
-	path_or_name: str,
-	lat_col: str | None,
-	lng_col: str | None,
-	crs_arg: str | None,
-	name_col: str | None,
-	*,
-	force_unheadered: bool,
-):
-	if path_or_name.startswith('username:'):
-		settings = Settings()
-		all_subs = await load_or_fetch_per_player_submissions(
-			settings.subs_per_player_path, settings.main_tpg_data_path
-		)
-		gdf = all_subs[path_or_name.removeprefix('username:')]
-	else:
-		gdf = await load_points_async(
-			path_or_name,
-			lat_col,
-			lng_col,
-			crs=crs_arg,
-			has_header=False if force_unheadered else None,
-		)
-	assert gdf.crs, 'gdf had no crs, which should never happen'
-	if not gdf.crs.is_geographic:
-		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
-		gdf = gdf.to_crs('wgs84')
-
-	gdf = gdf.set_index(name_col) if name_col else try_set_index_name_col(gdf)
-	if isinstance(gdf.index, pandas.RangeIndex):
-		gdf.index = pandas.Index(gdf.geometry.map(format_point))
-	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
-	return gdf.drop(index=list(to_drop)) if to_drop else gdf
-
-
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'point_set',
-		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
 
 	load_args = argparser.add_argument_group(
@@ -295,24 +250,16 @@ async def main() -> None:
 	)
 
 	args = argparser.parse_args()
-	gdf = await load_point_set(
+
+	point_set = await load_point_set_from_arg(
 		args.point_set,
 		args.lat_col,
 		args.lng_col,
 		args.crs,
 		args.name_col,
+		args.projected_crs,
 		force_unheadered=args.unheadered,
 	)
-
-	projected_crs = args.projected_crs
-	if not projected_crs:
-		projected_crs = get_projected_crs(gdf)
-		if projected_crs:
-			print(f'Autodetected CRS: {projected_crs.name} {projected_crs.srs}')
-		else:
-			print('Unable to autodetect CRS, this will result in using a generic one')
-
-	point_set = PointSet(gdf, projected_crs)
 
 	geo = point_set.points
 	print(f'{geo.size} points')

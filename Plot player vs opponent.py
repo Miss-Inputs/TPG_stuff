@@ -11,39 +11,15 @@ from pathlib import Path
 
 import contextily
 import geopandas
-import pandas
 from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame import get_best_pic, load_or_fetch_per_player_submissions, load_points
-from travelpygame.util import format_point, try_set_index_name_col
+from travelpygame import get_best_pic
 from travelpygame.util.point_construction import get_fixed_grid
 
-from lib.settings import Settings
+from lib.io_utils import load_point_set_from_arg
 
 logger = logging.getLogger(Path(__file__).stem)
-
-
-async def load_player(path_or_name: str, name_col: str | None):
-	if path_or_name.startswith('username:'):
-		settings = Settings()
-		all_subs = await load_or_fetch_per_player_submissions(
-			settings.subs_per_player_path, settings.main_tpg_data_path
-		)
-		player_points = all_subs[path_or_name.removeprefix('username:')]
-	else:
-		player_points = load_points(path_or_name)
-	assert player_points.crs, 'player_points had no crs, which should never happen'
-	if not player_points.crs.is_geographic:
-		logger.warning('player_points had non-geographic CRS %s, converting to WGS84')
-		player_points = player_points.to_crs('wgs84')
-
-	player_points = (
-		player_points.set_index(name_col) if name_col else try_set_index_name_col(player_points)
-	)
-	if isinstance(player_points.index, pandas.RangeIndex):
-		player_points.index = pandas.Index(player_points.geometry.map(format_point))
-	return player_points
 
 
 async def main() -> None:
@@ -56,7 +32,7 @@ async def main() -> None:
 	)
 	left_player_opts.add_argument(
 		'left_player',
-		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
 	left_player_opts.add_argument(
 		'--left-name-col',
@@ -69,7 +45,7 @@ async def main() -> None:
 	)
 	right_player_opts.add_argument(
 		'right_player',
-		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
+		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
 	right_player_opts.add_argument(
 		'--right-name-col',
@@ -114,24 +90,25 @@ async def main() -> None:
 
 	args = argparser.parse_args()
 
-	left_player = await load_player(args.left_player, args.left_name_col)
-	right_player = await load_player(args.right_player, args.right_name_col)
+	left_player = await load_point_set_from_arg(args.left_player, name_col=args.left_name_col)
+	right_player = await load_point_set_from_arg(args.right_player, name_col=args.right_name_col)
 
 	resolution: float = args.resolution
 	if args.limit_grid_to_bbox:
-		left_minx, left_miny, left_maxx, left_maxy = left_player.total_bounds
-		right_minx, right_miny, right_maxx, right_maxy = right_player.total_bounds
+		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
+		right_minx, right_miny, right_maxx, right_maxy = right_player.gdf.total_bounds
 		min_x = min(left_minx, right_minx)
 		min_y = min(left_miny, right_miny)
 		max_x = max(left_maxx, right_maxx)
 		max_y = max(left_maxy, right_maxy)
 	else:
+		# Having points at the exact edges gets screwy
 		min_x = -179
 		min_y = -89
 		max_x = 179
 		max_y = 89
 	point_grid: geopandas.GeoSeries = get_fixed_grid(min_x, min_y, max_x, max_y, resolution)
-	point_grid = point_grid.reset_index(drop=True)  # pyright: ignore[reportAssignmentType] #no mum you don't understand, it returns a Series and not a DataFrame
+	point_grid = point_grid.reset_index(drop=True)  # pyright: ignore[reportAssignmentType] #no mum you don't understand, it returns a Series and not a DataFrame, because of the drop=True
 	# TODO: Boxes would be more ideal than points, but also more complicated
 
 	left_best_pics = {}
@@ -141,9 +118,9 @@ async def main() -> None:
 		point_grid.items(), 'Computing distances to points', total=point_grid.size, unit='point'
 	):
 		assert isinstance(point, Point), f'Why is point {index} a {type(point)} and not a Point'
-		left_best_pic, left_distance = get_best_pic(left_player, point)
-		right_best_pic, right_distance = get_best_pic(right_player, point)
-		# TODO: Handle ties (or at least log them) instead of giving right player the win
+		left_best_pic, left_distance = get_best_pic(left_player.point_array, point)
+		right_best_pic, right_distance = get_best_pic(right_player.point_array, point)
+		# TODO: Handle ties (or at least log them) instead of giving right player the win, though for now that is very unlikely to happen
 		colours[index] = args.left_colour if left_distance < right_distance else args.right_colour
 		left_best_pics[index] = left_best_pic
 		right_best_pics[index] = right_best_pic
