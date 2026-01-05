@@ -13,7 +13,7 @@ import pandas
 import shapely
 from aiohttp import ClientSession
 from travelpygame import (
-	PointSetInfo,
+	PointSet,
 	find_furthest_point,
 	get_uniqueness,
 	load_or_fetch_per_player_submissions,
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 async def print_furthest_point_from_poly(
-	points: PointSetInfo, poly: 'BaseGeometry', session: ClientSession, name: str = 'polygon'
+	points: PointSet, poly: 'BaseGeometry', session: ClientSession, name: str = 'polygon'
 ):
 	furthest_point, dist = find_furthest_point(points.point_array, polygon=poly)
 	desc = await describe_point(furthest_point, session, include_coords=True)
@@ -60,9 +60,7 @@ async def print_furthest_point_from_poly(
 	)
 
 
-async def print_furthest_point(
-	point_set: PointSetInfo, initial: shapely.Point, session: ClientSession
-):
+async def print_furthest_point(point_set: PointSet, initial: shapely.Point, session: ClientSession):
 	furthest_point, dist = find_furthest_point(point_set.point_array, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
 	closest_index, _ = get_closest_index(furthest_point, point_set.point_array)
@@ -80,7 +78,7 @@ async def print_furthest_point(
 
 
 async def print_point(
-	point_set: PointSetInfo,
+	point_set: PointSet,
 	point: shapely.Point,
 	name: str,
 	session: ClientSession,
@@ -108,7 +106,7 @@ async def print_point(
 	print()
 
 
-async def print_average_points(point_set: PointSetInfo, session: ClientSession):
+async def print_average_points(point_set: PointSet, session: ClientSession):
 	coords = point_set.coord_array
 
 	x, y = coords.T
@@ -133,7 +131,7 @@ async def print_average_points(point_set: PointSetInfo, session: ClientSession):
 	await print_point(point_set, geo_median, 'Geometric median', session)
 
 
-async def print_extreme_points(point_set: PointSetInfo, session: ClientSession):
+async def print_extreme_points(point_set: PointSet, session: ClientSession):
 	geo = point_set.points
 	west, south, east, north = geo.total_bounds
 
@@ -160,7 +158,7 @@ async def print_extreme_points(point_set: PointSetInfo, session: ClientSession):
 	await print_point(point_set, centre, 'Centre of extremes', session)
 
 
-def print_unique_points(point_set: PointSetInfo, uniqueness_path: Path | None):
+def print_unique_points(point_set: PointSet, uniqueness_path: Path | None):
 	closest, uniqueness_ = get_uniqueness(point_set.points)
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
@@ -314,7 +312,7 @@ async def main() -> None:
 		else:
 			print('Unable to autodetect CRS, this will result in using a generic one')
 
-	point_set = PointSetInfo(gdf, projected_crs)
+	point_set = PointSet(gdf, projected_crs)
 
 	geo = point_set.points
 	print(f'{geo.size} points')
