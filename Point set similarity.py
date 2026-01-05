@@ -16,13 +16,12 @@ import pandas
 import pyproj
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import load_or_fetch_per_player_submissions
+from travelpygame import load_or_fetch_per_player_submissions, validate_points
 from travelpygame.point_set_stats import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
 	get_distance_method_combinations,
 	get_point_set_distance,
-	validate_points,
 )
 from travelpygame.util import (
 	first_unique_column_label,
@@ -77,7 +76,7 @@ def load_and_validate(
 	if not new_name_col:
 		gdf.index = pandas.Index(gdf.geometry.map(format_point))
 	print(f'{path.name}: {gdf.index.size} items')
-	gs = validate_points(gdf, name_for_log=path)
+	gs, _ = validate_points(gdf, name_for_log=path)
 	gs = gs.rename(path.stem)
 	print(f'{path.name} after validation: {gs.size} items')
 	return gs

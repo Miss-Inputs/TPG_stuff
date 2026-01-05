@@ -4,9 +4,8 @@
 import asyncio
 import logging
 from argparse import ArgumentParser
-from collections.abc import Collection
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import geopandas
 import numpy
@@ -14,27 +13,28 @@ import pandas
 import shapely
 from aiohttp import ClientSession
 from travelpygame import (
+	PointSetInfo,
 	find_furthest_point,
 	get_uniqueness,
 	load_or_fetch_per_player_submissions,
 	load_points_async,
+	validate_points,
 )
 from travelpygame.point_set_stats import find_geometric_median, get_total_uniqueness
 from travelpygame.util import (
-	circular_mean_points,
+	circular_mean_xy,
 	fix_x_coord,
 	fix_y_coord,
 	format_dataframe,
 	format_distance,
 	format_point,
+	geometry_to_file_async,
 	get_centroid,
 	get_closest_index,
-	get_distances,
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
 	get_polygons,
 	get_projected_crs,
-	mean_points,
 	output_geodataframe,
 	read_geodataframe_async,
 	try_set_index_name_col,
@@ -50,40 +50,37 @@ logger = logging.getLogger(__name__)
 
 
 async def print_furthest_point_from_poly(
-	geo: geopandas.GeoSeries,
-	points: Collection[shapely.Point],
-	poly: 'BaseGeometry',
-	session: ClientSession,
-	name: str = 'polygon',
+	points: PointSetInfo, poly: 'BaseGeometry', session: ClientSession, name: str = 'polygon'
 ):
-	furthest_point, dist = find_furthest_point(points, polygon=poly)
+	furthest_point, dist = find_furthest_point(points.point_array, polygon=poly)
 	desc = await describe_point(furthest_point, session, include_coords=True)
-	closest_index, _ = get_closest_index(furthest_point, points)
+	closest_index, _ = get_closest_index(furthest_point, points.point_array)
 	print(
-		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
+		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {points.points.index[closest_index]}'
 	)
 
 
 async def print_furthest_point(
-	geo: geopandas.GeoSeries, mp: shapely.MultiPoint, initial: shapely.Point, session: ClientSession
+	point_set: PointSetInfo, initial: shapely.Point, session: ClientSession
 ):
-	points = geo.to_numpy()
-	furthest_point, dist = find_furthest_point(points, initial)
+	furthest_point, dist = find_furthest_point(point_set.point_array, initial)
 	desc = await describe_point(furthest_point, session, include_coords=True)
-	closest_index, _ = get_closest_index(furthest_point, points)
+	closest_index, _ = get_closest_index(furthest_point, point_set.point_array)
 	print(
-		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {geo.index[closest_index]}'
+		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {point_set.points.index[closest_index]}'
 	)
 
-	await print_furthest_point_from_poly(geo, points, mp.envelope, session, 'own bounding box')
-	await print_furthest_point_from_poly(geo, points, mp.convex_hull, session, 'own convex hull')
+	await print_furthest_point_from_poly(point_set, point_set.envelope, session, 'own bounding box')
 	await print_furthest_point_from_poly(
-		geo, points, shapely.concave_hull(mp), session, 'own concave hull'
+		point_set, point_set.convex_hull, session, 'own convex hull'
+	)
+	await print_furthest_point_from_poly(
+		point_set, point_set.concave_hull, session, 'own concave hull'
 	)
 
 
 async def print_point(
-	geo: geopandas.GeoSeries,
+	point_set: PointSetInfo,
 	point: shapely.Point,
 	name: str,
 	session: ClientSession,
@@ -91,14 +88,16 @@ async def print_point(
 	get_median: bool = False,
 ):
 	print(f'{name}:', await describe_point(point, session, include_coords=True))
-	distances = pandas.Series(get_distances(point, geo), index=geo.index).sort_values()
-	if point not in geo:
+	distances = point_set.get_all_distances(point)
+	if not point_set.contains(point):
 		dist = distances.iloc[0]
 		closest = distances.index[0]
 		print(f'Closest to: {closest}, {format_distance(dist)} away')
+
 	furthest_dist = distances.iloc[-1]
 	furthest = distances.index[-1]
 	print(f'Furthest from: {furthest}, {format_distance(furthest_dist)} away')
+
 	if get_median:
 		median_index = distances.size // 2
 		median = distances.iloc[median_index]
@@ -109,30 +108,33 @@ async def print_point(
 	print()
 
 
-async def print_average_points(
-	geo: geopandas.GeoSeries, mp: shapely.MultiPoint, projected_crs: Any, session: ClientSession
-):
-	circ = circular_mean_points(geo)
-	await print_point(geo, circ, 'Circular mean point', session)
-	mean = mean_points(geo)
-	await print_point(geo, mean, 'Mean point', session)
+async def print_average_points(point_set: PointSetInfo, session: ClientSession):
+	coords = point_set.coord_array
 
-	coords = shapely.get_coordinates(geo)
+	x, y = coords.T
+	circ_mean_x, circ_mean_y = circular_mean_xy(x, y)
+	circ = shapely.Point(circ_mean_x, circ_mean_y)
+	await print_point(point_set, circ, 'Circular mean point', session)
+
+	mean = shapely.Point(fix_x_coord(x.mean()), fix_y_coord(y.mean()))
+	await print_point(point_set, mean, 'Mean point', session)
+
 	median_coords = numpy.median(coords, axis=0)
 	median = shapely.Point(fix_x_coord(median_coords[0]), fix_y_coord(median_coords[1]))
-	await print_point(geo, median, 'Median point', session)
+	await print_point(point_set, median, 'Median point', session)
 
-	centroid = get_centroid(mp, projected_crs, geo.crs)
-	await print_point(geo, centroid, 'Centroid of all points', session)
-	centroid_distances = get_distances(centroid, geo)
+	centroid = point_set.centroid
+	await print_point(point_set, centroid, 'Centroid of all points', session)
+	centroid_distances = point_set.get_all_distances(centroid)
 	print(f'Total distance from centroid: {format_distance(centroid_distances.sum())}')
 	print(f'Mean distance from centroid: {format_distance(centroid_distances.mean())}')
 
-	geo_median = find_geometric_median(geo, centroid)
-	await print_point(geo, geo_median, 'Geometric median', session)
+	geo_median = find_geometric_median(point_set.points, centroid)
+	await print_point(point_set, geo_median, 'Geometric median', session)
 
 
-async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession):
+async def print_extreme_points(point_set: PointSetInfo, session: ClientSession):
+	geo = point_set.points
 	west, south, east, north = geo.total_bounds
 
 	westmost = geo[geo.x == west]
@@ -145,10 +147,6 @@ async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession)
 	print('Northmost point(s):', ', '.join(northmost.index), f'({north})')
 	print()
 
-	centre_x = fix_x_coord((west + east) / 2)
-	centre_y = fix_y_coord((south + north) / 2)
-	await print_point(geo, shapely.Point(centre_x, centre_y), 'Centre of extremes', session)
-
 	nw, ne, se, sw = get_extreme_corners_of_point_set(geo)
 	print(f'Northwestmost point: {nw}')
 	print(f'Northeastmost point: {ne}')
@@ -156,17 +154,22 @@ async def print_extreme_points(geo: geopandas.GeoSeries, session: ClientSession)
 	print(f'Southwestmost point: {sw}')
 	print()
 
+	centre_x = fix_x_coord((west + east) / 2)
+	centre_y = fix_y_coord((south + north) / 2)
+	centre = shapely.Point(centre_x, centre_y)
+	await print_point(point_set, centre, 'Centre of extremes', session)
 
-def print_unique_points(geo: geopandas.GeoSeries, uniqueness_path: Path | None):
-	closest, uniqueness_ = get_uniqueness(geo)
+
+def print_unique_points(point_set: PointSetInfo, uniqueness_path: Path | None):
+	closest, uniqueness_ = get_uniqueness(point_set.points)
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
 	if uniqueness_path:
 		uniqueness.to_csv(uniqueness_path)
 	print(format_dataframe(uniqueness, 'uniqueness'))
 
-	total_uniqueness = get_total_uniqueness(geo)
-	avg_uniqueness = total_uniqueness / (geo.size - 1)
+	total_uniqueness = get_total_uniqueness(point_set.points)
+	avg_uniqueness = total_uniqueness / (point_set.points.size - 1)
 	print(
 		format_dataframe(
 			pandas.DataFrame(
@@ -183,56 +186,110 @@ async def load_polygons(path: Path):
 	return shapely.MultiPolygon(polygons) if polygons else None
 
 
-async def main() -> None:  # noqa: C901 #nah
+async def load_point_set(
+	path_or_name: str,
+	lat_col: str | None,
+	lng_col: str | None,
+	crs_arg: str | None,
+	name_col: str | None,
+	*,
+	force_unheadered: bool,
+):
+	if path_or_name.startswith('username:'):
+		settings = Settings()
+		all_subs = await load_or_fetch_per_player_submissions(
+			settings.subs_per_player_path, settings.main_tpg_data_path
+		)
+		gdf = all_subs[path_or_name.removeprefix('username:')]
+	else:
+		gdf = await load_points_async(
+			path_or_name,
+			lat_col,
+			lng_col,
+			crs=crs_arg,
+			has_header=False if force_unheadered else None,
+		)
+	assert gdf.crs, 'gdf had no crs, which should never happen'
+	if not gdf.crs.is_geographic:
+		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
+		gdf = gdf.to_crs('wgs84')
+
+	gdf = gdf.set_index(name_col) if name_col else try_set_index_name_col(gdf)
+	if isinstance(gdf.index, pandas.RangeIndex):
+		gdf.index = pandas.Index(gdf.geometry.map(format_point))
+	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
+	return gdf.drop(index=list(to_drop)) if to_drop else gdf
+
+
+async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
-		'path',
+		'point_set',
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or username:<player username>, which will load all the submissions for a particular player.',
 	)
 
-	argparser.add_argument(
+	load_args = argparser.add_argument_group(
+		'Loading arguments', 'Arguments to control how point_set is loaded'
+	)
+	output_args = argparser.add_argument_group(
+		'Output arguments', 'Arguments to control what additional information is saved and where'
+	)
+
+	load_args.add_argument(
 		'--lat-column',
 		'--latitude-column',
 		dest='lat_col',
 		help='Force a specific column label for latitude, defaults to autodetected',
 	)
-	argparser.add_argument(
+	load_args.add_argument(
 		'--lng-column',
 		'--longitude-column',
 		dest='lng_col',
 		help='Force a specific column label for longitude, defaults to autodetected',
 	)
-	argparser.add_argument(
+	load_args.add_argument(
 		'--unheadered',
 		action='store_true',
 		help='Explicitly treat csv/Excel as not having a header, otherwise autodetect (and default to yes header if unknown)',
 	)
-	argparser.add_argument(
-		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
+	load_args.add_argument(
+		'--crs',
+		default='wgs84',
+		help='Coordinate reference system to use if point_set is .csv/.ods/etc, defaults to WGS84',
 	)
+	load_args.add_argument(
+		'--name-col',
+		help='Force a specific column label for the name of each point, otherwise autodetect',
+	)
+
 	argparser.add_argument(
 		'--projected-crs',
 		'--metric-crs',
 		'--metres-crs',
 		help='Projected coordinate reference system to use for some operations, autodetect if not specified',
 	)
-	argparser.add_argument(
-		'--name-col',
-		help='Force a specific column label for the name of each point, otherwise autodetect',
+
+	output_args.add_argument(
+		'--uniqueness-path',
+		type=Path,
+		help='Optionally output uniqueness of each pic to here (as a table)',
+	)
+	output_args.add_argument(
+		'--antipodes-path',
+		type=Path,
+		help='Optionally output antipodes of each pic to here (as a table)',
+	)
+	output_args.add_argument(
+		'--convex-hull-path',
+		type=Path,
+		help='Optionally output convex hull of all pics to here (can be geojson, etc)',
+	)
+	output_args.add_argument(
+		'--concave-hull-path',
+		type=Path,
+		help='Optionally output concave hull of all pics to here (can be geojson, etc)',
 	)
 
-	argparser.add_argument(
-		'--uniqueness-path', type=Path, help='Optionally output uniqueness of each pic to here'
-	)
-	argparser.add_argument(
-		'--antipodes-path', type=Path, help='Optionally output antipodes of each pic to here'
-	)
-	argparser.add_argument(
-		'--convex-hull-path', type=Path, help='Optionally output convex hull of all pics to here'
-	)
-	argparser.add_argument(
-		'--concave-hull-path', type=Path, help='Optionally output concave hull of all pics to here'
-	)
 	argparser.add_argument(
 		'--polygon-path',
 		type=Path,
@@ -240,32 +297,15 @@ async def main() -> None:  # noqa: C901 #nah
 	)
 
 	args = argparser.parse_args()
-	path: str = args.path
-	if path.startswith('username:'):
-		settings = Settings()
-		all_subs = await load_or_fetch_per_player_submissions(
-			settings.subs_per_player_path, settings.main_tpg_data_path
-		)
-		gdf = all_subs[path.removeprefix('username:')]
-	else:
-		gdf = await load_points_async(
-			path,
-			args.lat_col,
-			args.lng_col,
-			crs=args.crs,
-			has_header=False if args.unheadered else None,
-		)
-	assert gdf.crs, 'gdf had no crs, which should never happen'
-	if not gdf.crs.is_geographic:
-		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
-		gdf = gdf.to_crs('wgs84')
+	gdf = await load_point_set(
+		args.point_set,
+		args.lat_col,
+		args.lng_col,
+		args.crs,
+		args.name_col,
+		force_unheadered=args.unheadered,
+	)
 
-	gdf = gdf.set_index(args.name_col) if args.name_col else try_set_index_name_col(gdf)
-	if isinstance(gdf.index, pandas.RangeIndex):
-		gdf.index = pandas.Index(gdf.geometry.map(format_point))
-
-	geo = gdf.geometry
-	print(f'{geo.size} points')
 	projected_crs = args.projected_crs
 	if not projected_crs:
 		projected_crs = get_projected_crs(gdf)
@@ -274,14 +314,15 @@ async def main() -> None:  # noqa: C901 #nah
 		else:
 			print('Unable to autodetect CRS, this will result in using a generic one')
 
-	mp = shapely.MultiPoint(geo.to_numpy())
+	point_set = PointSetInfo(gdf, projected_crs)
+
+	geo = point_set.points
+	print(f'{geo.size} points')
+
 	if args.convex_hull_path:
-		# We will only compute it if we're outputting it, since there's not really a nice way to display it, and we don't do anything else with it
-		convex_hull = shapely.convex_hull(mp)
-		geopandas.GeoSeries([convex_hull], crs=gdf.crs).to_file(args.convex_hull_path)
+		await geometry_to_file_async(args.convex_hull_path, point_set.convex_hull)
 	if args.concave_hull_path:
-		concave_hull = shapely.concave_hull(mp)
-		geopandas.GeoSeries([concave_hull], crs=gdf.crs).to_file(args.concave_hull_path)
+		await geometry_to_file_async(args.concave_hull_path, point_set.concave_hull)
 
 	antipoints = get_point_antipodes(geo)
 	if args.antipodes_path:
@@ -296,21 +337,19 @@ async def main() -> None:  # noqa: C901 #nah
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
 
-	print_unique_points(geo, args.uniqueness_path)
+	print_unique_points(point_set, args.uniqueness_path)
 
 	async with ClientSession() as sesh:
-		await print_extreme_points(geo, sesh)
-		await print_average_points(geo, mp, projected_crs, sesh)
-		await print_furthest_point(geo, mp, get_centroid(antipoints_mp), sesh)
+		await print_extreme_points(point_set, sesh)
+		await print_average_points(point_set, sesh)
+		await print_furthest_point(point_set, get_centroid(antipoints_mp), sesh)
 		polygon_path: Path | None = args.polygon_path
 		if polygon_path:
 			polygon = await load_polygons(polygon_path)
 			if polygon:
+				await print_furthest_point_from_poly(point_set, polygon, sesh, polygon_path.stem)
 				await print_furthest_point_from_poly(
-					geo, geo.to_numpy(), polygon, sesh, polygon_path.stem
-				)
-				await print_furthest_point_from_poly(
-					geo, geo.to_numpy(), polygon.envelope, sesh, f'{polygon_path.stem} bounding box'
+					point_set, polygon.envelope, sesh, f'{polygon_path.stem} bounding box'
 				)
 			else:
 				print(f'Could not find any polygons in {polygon_path.stem}')
