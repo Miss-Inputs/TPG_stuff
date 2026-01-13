@@ -63,7 +63,7 @@ async def load_path_or_player(
 			path_or_name,
 			lat_col,
 			lng_col,
-			crs=crs_arg,
+			crs=crs_arg or 'wgs84',
 			has_header=False if force_unheadered else None,
 		)
 	assert gdf.crs, 'gdf had no crs, which should never happen'

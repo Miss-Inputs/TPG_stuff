@@ -14,12 +14,33 @@ import geopandas
 from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame import get_best_pic
+from travelpygame import PointSet, get_best_pic
 from travelpygame.util.point_construction import get_fixed_grid
 
 from lib.io_utils import load_point_set_from_arg
 
 logger = logging.getLogger(Path(__file__).stem)
+
+
+def get_grid(
+	left_player: PointSet, right_player: PointSet, resolution: float, *, limit_grid_to_bbox: bool
+):
+	if limit_grid_to_bbox:
+		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
+		right_minx, right_miny, right_maxx, right_maxy = right_player.gdf.total_bounds
+		min_x = min(left_minx, right_minx)
+		min_y = min(left_miny, right_miny)
+		max_x = max(left_maxx, right_maxx)
+		max_y = max(left_maxy, right_maxy)
+	else:
+		# Having points at the exact edges gets screwy
+		min_x = -179
+		min_y = -89
+		max_x = 179
+		max_y = 89
+	point_grid: geopandas.GeoSeries = get_fixed_grid(min_x, min_y, max_x, max_y, resolution)
+	return point_grid.reset_index(drop=True)
+	# TODO: Boxes would be more ideal than points, but also more complicated
 
 
 async def main() -> None:
@@ -93,23 +114,9 @@ async def main() -> None:
 	left_player = await load_point_set_from_arg(args.left_player, name_col=args.left_name_col)
 	right_player = await load_point_set_from_arg(args.right_player, name_col=args.right_name_col)
 
-	resolution: float = args.resolution
-	if args.limit_grid_to_bbox:
-		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
-		right_minx, right_miny, right_maxx, right_maxy = right_player.gdf.total_bounds
-		min_x = min(left_minx, right_minx)
-		min_y = min(left_miny, right_miny)
-		max_x = max(left_maxx, right_maxx)
-		max_y = max(left_maxy, right_maxy)
-	else:
-		# Having points at the exact edges gets screwy
-		min_x = -179
-		min_y = -89
-		max_x = 179
-		max_y = 89
-	point_grid: geopandas.GeoSeries = get_fixed_grid(min_x, min_y, max_x, max_y, resolution)
-	point_grid = point_grid.reset_index(drop=True)  # pyright: ignore[reportAssignmentType] #no mum you don't understand, it returns a Series and not a DataFrame, because of the drop=True
-	# TODO: Boxes would be more ideal than points, but also more complicated
+	point_grid = get_grid(
+		left_player, right_player, args.resolution, limit_grid_to_bbox=args.limit_grid_to_bbox
+	)
 
 	left_best_pics = {}
 	right_best_pics = {}
