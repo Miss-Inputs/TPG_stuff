@@ -163,7 +163,7 @@ def get_pics(
 	pics = {
 		player: player_pics
 		for player, player_pics in subs_per_user.items()
-		if threshold is None or player_pics.size >= threshold
+		if threshold is None or player_pics.index.size >= threshold
 	}
 	if additional_players:
 		for additional_name, path in additional_players:
@@ -291,7 +291,8 @@ def main() -> None:
 		help='Add a new player with a name and points from a file (pair of arguments in that order, can be specified multiple times)',
 	)
 	# TODO: Option to _not_ load players from TPG data
-	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
+	# Everything should be optional here, and subs_per_user and targets should be completely separate, but by default load the former as usual and use main TPG data for the latter but have options to not do that, just throw an error if we end up with no players or no points
+	# TODO: Grid of points for target
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()
 
