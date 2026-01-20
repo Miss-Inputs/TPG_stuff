@@ -11,7 +11,7 @@ from travelpygame import (
 	validate_points,
 )
 from travelpygame.tpg_data import get_player_username
-from travelpygame.util import format_point, get_projected_crs, try_set_index_name_col
+from travelpygame.util import format_point, try_set_index_name_col
 
 from .settings import Settings
 
@@ -95,15 +95,5 @@ async def load_point_set_from_arg(
 	name, gdf = await load_path_or_player(
 		path_or_name, lat_col, lng_col, crs_arg, name_col, force_unheadered=force_unheadered
 	)
-	if projected_crs_arg:
-		projected_crs = projected_crs_arg
-	else:
-		projected_crs = get_projected_crs(gdf)
-		if projected_crs:
-			logger.info('%s: Autodetected CRS: %s %s', name, projected_crs.name, projected_crs.srs)
-		else:
-			logger.warning(
-				'%s: Unable to autodetect CRS, this will result in using a generic one', name
-			)
 
-	return PointSet(gdf, name, projected_crs)
+	return PointSet(gdf, name, projected_crs_arg)

@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 """Simulate rounds as though all known players are present and submitting what is known to be their best pic."""
 
+import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import shapely
-from geopandas.geoseries import GeoSeries
 from pandas import Index, RangeIndex
-from travelpygame import Round, ScoringOptions, load_points, load_rounds, main_tpg_scoring
+from tqdm.auto import tqdm
+from travelpygame import (
+	PointSet,
+	Round,
+	ScoringOptions,
+	load_or_fetch_per_player_submissions,
+	load_points,
+	load_rounds,
+	main_tpg_scoring,
+)
 from travelpygame.random_points import random_point_in_bbox, random_points_in_poly
 from travelpygame.simulation import (
 	SimulatedStrategy,
@@ -20,7 +29,7 @@ from travelpygame.simulation import (
 	get_round_summary,
 	simulate_existing_rounds,
 )
-from travelpygame.tpg_data import get_submissions_per_user_from_path, rounds_to_json
+from travelpygame.tpg_data import PlayerUsername, rounds_to_json
 from travelpygame.util import (
 	format_point,
 	format_xy,
@@ -29,8 +38,10 @@ from travelpygame.util import (
 	try_set_index_name_col,
 )
 
+from lib.settings import Settings
+
 if TYPE_CHECKING:
-	from geopandas import GeoSeries
+	from geopandas import GeoDataFrame
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -56,7 +67,7 @@ def compare_rounds(old_round: Round, new_round: Round, name: str | None):
 
 def get_simulation(
 	existing_rounds: list[Round] | None,
-	pics: Mapping[str, 'GeoSeries | Sequence[shapely.Point]'],
+	point_sets: Collection[PointSet],
 	scoring: ScoringOptions,
 	strategy: SimulatedStrategy,
 	targets_path: Path | None,
@@ -69,7 +80,7 @@ def get_simulation(
 		if existing_rounds is None:
 			raise RuntimeError('You have nothing to simulate')
 		return simulate_existing_rounds(
-			existing_rounds, pics, scoring, strategy, use_haversine=use_haversine
+			existing_rounds, point_sets, scoring, strategy, use_haversine=use_haversine
 		)
 
 	if targets_path:
@@ -82,6 +93,7 @@ def get_simulation(
 	elif num_random_rounds:
 		if region_path:
 			region = read_geodataframe(region_path)
+			# TODO: This wants a random seed argument
 			points = random_points_in_poly(
 				region, num_random_rounds, use_tqdm=True, desc='Generating random points'
 			)
@@ -90,7 +102,7 @@ def get_simulation(
 		rounds = {format_point(point): point for point in points}
 	else:
 		raise RuntimeError('Not sure how we got here')
-	return Simulation(rounds, None, pics, scoring, strategy, use_haversine=use_haversine)
+	return Simulation(rounds, None, point_sets, scoring, strategy, use_haversine=use_haversine)
 
 
 def output_results(
@@ -142,21 +154,22 @@ def load_with_name(path: Path | str):
 
 
 def get_pics(
-	pics_per_user: Mapping[str, 'GeoSeries'],
+	subs_per_user: Mapping[PlayerUsername, 'GeoDataFrame'],
 	name: str | None,
 	points_path: Path | None,
 	threshold: int | None,
 	additional_players: list[list[str]] | None,
-) -> dict[str, 'GeoSeries']:
+) -> list[PointSet]:
 	pics = {
 		player: player_pics
-		for player, player_pics in pics_per_user.items()
+		for player, player_pics in subs_per_user.items()
 		if threshold is None or player_pics.size >= threshold
 	}
 	if additional_players:
 		for additional_name, path in additional_players:
 			points = load_with_name(path)
-			pics[additional_name] = points.geometry
+			pics[additional_name] = points
+	# TODO: Refactoring, just have a list point_sets and append them
 
 	if points_path:
 		if not name:
@@ -165,10 +178,10 @@ def get_pics(
 			)
 		else:
 			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			pics[name] = load_with_name(points_path).geometry
+			pics[name] = load_with_name(points_path)
 	if not pics:
 		raise RuntimeError('Nobody is able to be simulated')
-	return pics
+	return [PointSet(gdf, name) for name, gdf in tqdm(pics.items(), 'Loading pics')]
 
 
 def main() -> None:
@@ -209,7 +222,7 @@ def main() -> None:
 	sim_args.add_argument(
 		'--custom-scoring',
 		type=float,
-		help="If specified, use a scoring method for regional TPGs with this as the world distance in km. If not specified, use main TPG scoring. This is a bit awkward but I could'nt think of anything better right now whoops",
+		help="If specified, use a scoring method for regional TPGs with this as the world distance in km. If not specified, use main TPG scoring. This is a bit awkward but I couldn't think of anything better right now whoops",
 	)
 	sim_args.add_argument(
 		'--strategy',
@@ -277,6 +290,7 @@ def main() -> None:
 		metavar=('name', 'point_set_path'),
 		help='Add a new player with a name and points from a file (pair of arguments in that order, can be specified multiple times)',
 	)
+	# TODO: Option to _not_ load players from TPG data
 	# TODO: Get main TPG data if data_path is not provided (would need to rewrite this as async which isn't necessarily difficult or time consuming but I'm very cbf)
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()
@@ -300,10 +314,13 @@ def main() -> None:
 	else:
 		scoring = main_tpg_scoring
 
+	# TODO: Rejiggle this, loading any of this should be optional
+	settings = Settings()
 	existing_rounds = load_rounds(path) if path.suffix[1:].lower() == 'json' else None
-	pics_per_user = get_submissions_per_user_from_path(path)
 
-	pics = get_pics(pics_per_user, name, points_path, args.threshold, args.add_player)
+	subs_per_user = asyncio.run(load_or_fetch_per_player_submissions(settings.subs_per_player_path))
+
+	pics = get_pics(subs_per_user, name, points_path, args.threshold, args.add_player)
 	simulation = get_simulation(
 		existing_rounds,
 		pics,
@@ -315,7 +332,8 @@ def main() -> None:
 		use_haversine=args.use_haversine,
 	)
 
-	if name and name not in simulation.player_pics:
+	player_names = {point_set.name for point_set in simulation.point_sets}
+	if name and name not in player_names:
 		print(
 			f'Warning: {name} was not found in TPG data or otherwise did not have any pics, so does not exist in this context. Setting to None'
 		)
