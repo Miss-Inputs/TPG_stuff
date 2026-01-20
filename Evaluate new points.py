@@ -146,7 +146,7 @@ def _get_point_name(current_points: geopandas.GeoSeries, current_diff: Submissio
 	index = find_first_geom_index(current_points, current_diff.player_pic)
 	if isinstance(index, str):
 		return index
-	return current_diff.player_pic_description
+	return current_diff.player_pic_description or format_point(current_diff.player_pic)
 
 
 def eval_with_rounds(
@@ -325,6 +325,8 @@ def main() -> None:
 	)
 	# TODO: Option for new_points to just be one point
 	# TODO: lat/lng/blah column name options
+	# TODO: Allow eval_with_targets while just using the rounds from --rounds-path instead of specifying targets
+	# TODO: Allow specifying either username or player display name for --player, in some intuitive/non-stupid way
 	args = argparser.parse_args()
 
 	points = load_points(args.existing_points)
