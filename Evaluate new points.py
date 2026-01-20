@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Given an existing set of points (photos that one has for submitting to TPG, etc), and a set of new points to be added (e.g. new destinations to consider travelling to), finds out what is the most optimal."""
 
+import asyncio
 import logging
 from argparse import ZERO_OR_MORE, ArgumentParser, BooleanOptionalAction
 from operator import attrgetter
@@ -12,7 +13,7 @@ from pandas import Index, RangeIndex
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import load_rounds
+from travelpygame import PointSet, load_points_async, load_rounds_async
 from travelpygame.best_pics import get_worst_point
 from travelpygame.new_pic_eval import (
 	find_if_new_pics_better,
@@ -33,15 +34,14 @@ from travelpygame.util import (
 	format_ordinal,
 	format_point,
 	get_closest_index,
-	load_points,
 	output_geodataframe,
 	try_set_index_name_col,
 )
 
+from lib.io_utils import load_point_set_from_arg
 
-def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataFrame):
-	points_geom = points.geometry.to_numpy()
 
+def get_distances(points: PointSet, new_points: geopandas.GeoDataFrame, *, use_haversine: bool):
 	rows = []
 	with tqdm(
 		new_points.geometry.items(), 'Calculating distances', new_points.index.size, unit='point'
@@ -52,8 +52,10 @@ def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataF
 				raise TypeError(
 					f'new points contained {type(new_point)} at {index} instead of Point'
 				)
-			closest_index, distance = get_closest_index(new_point, points_geom)
-			closest = points.index[closest_index]
+			closest_index, distance = get_closest_index(
+				new_point, points.point_array, use_haversine=use_haversine
+			)
+			closest = points.points.index[closest_index]
 			rows.append(
 				{
 					'new_point': index,
@@ -68,20 +70,22 @@ def get_distances(points: geopandas.GeoDataFrame, new_points: geopandas.GeoDataF
 
 
 def get_where_pics_better(
-	points: geopandas.GeoSeries,
+	points: PointSet,
 	new_points: geopandas.GeoSeries,
 	targets: geopandas.GeoDataFrame,
 	*,
 	use_haversine: bool = True,
 ):
-	results = find_if_new_pics_better(points, new_points, targets, use_haversine=use_haversine)
+	results = find_if_new_pics_better(
+		points.point_array, new_points, targets, use_haversine=use_haversine
+	)
 	better = results[results['is_new_better']].copy().drop(columns='is_new_better')
 	better['diff'] = better['current_distance'] - better['new_distance']
 	return better.sort_values('diff', ascending=False)
 
 
-def eval_with_targets(
-	points: geopandas.GeoDataFrame,
+async def eval_with_targets(
+	points: PointSet,
 	new_points: geopandas.GeoDataFrame,
 	target_paths: list[Path],
 	output_path: Path | None,
@@ -90,7 +94,7 @@ def eval_with_targets(
 	find_if_any_pics_better: bool = True,
 ):
 	"""The function name kinda sucks but if it starts with test_ then Ruff thinks it's a test function and complains about things accordingly"""
-	targets = load_points_or_rounds(target_paths)
+	targets = await asyncio.to_thread(load_points_or_rounds, target_paths)
 	targets = try_set_index_name_col(targets)
 	is_default_index = isinstance(targets.index, RangeIndex)
 	dupe_geometry = targets.duplicated('geometry', keep=False)
@@ -101,13 +105,14 @@ def eval_with_targets(
 	if is_default_index:
 		# Try and get something more descriptive than just the default increasing index
 		# We do the isinstance check before drop_duplicates as that may change it
+		print('Setting default index for targets')
 		targets.index = Index(
 			[format_point(geo) if isinstance(geo, Point) else str(geo) for geo in targets.geometry]
 		)
 
 	if find_if_any_pics_better:
 		better = get_where_pics_better(
-			points.geometry, new_points.geometry, targets, use_haversine=use_haversine
+			points, new_points.geometry, targets, use_haversine=use_haversine
 		)
 		print('Number of times each pic was better (with all new pics at once):')
 		print(
@@ -117,14 +122,16 @@ def eval_with_targets(
 			.sort_values(ascending=False)
 		)
 		if output_path:
-			better.to_csv(output_path)
+			await asyncio.to_thread(better.to_csv, output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		points, targets, use_haversine=use_haversine
+		points.point_array, targets, use_haversine=use_haversine
 	)
 	print(f'Worst case target: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}')
-	combined = pandas.concat([points, new_points])
-	assert isinstance(combined, geopandas.GeoDataFrame)
+	combined = pandas.concat([points.gdf, new_points])
+	assert isinstance(combined, geopandas.GeoDataFrame), (
+		f'concat(points.gdf, new_points) resulted in {(type(combined))} and not GeoDataFrame'
+	)
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
 		combined, targets, use_haversine=use_haversine
 	)
@@ -133,24 +140,25 @@ def eval_with_targets(
 	)
 
 	diffs = find_new_pics_better_individually(
-		points, new_points, targets, use_haversine=use_haversine
+		points.point_array, new_points, targets, use_haversine=use_haversine
 	)
 	not_used = ', '.join(new_points.index.difference(diffs.index))
 	if not_used:
 		print(f'Never better: {not_used}')
 	diffs = diffs.sort_values('mean', ascending=False)
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
+	# Should this be (optionally) output somewhere?
 
 
-def _get_point_name(current_points: geopandas.GeoSeries, current_diff: SubmissionDifference):
-	index = find_first_geom_index(current_points, current_diff.player_pic)
+def _get_point_name(current_points: PointSet, current_diff: SubmissionDifference):
+	index = find_first_geom_index(current_points.points, current_diff.player_pic)
 	if isinstance(index, str):
 		return index
 	return current_diff.player_pic_description or format_point(current_diff.player_pic)
 
 
-def eval_with_rounds(
-	current_points: geopandas.GeoSeries,
+async def eval_with_rounds(
+	current_points: PointSet,
 	new_points: geopandas.GeoSeries,
 	rounds_path: Path,
 	name: str,
@@ -158,7 +166,7 @@ def eval_with_rounds(
 	*,
 	use_haversine: bool = False,
 ):
-	rounds = load_rounds(rounds_path)
+	rounds = await load_rounds_async(rounds_path)
 	rounds.sort(key=attrgetter('number'))
 
 	rows = []
@@ -173,11 +181,11 @@ def eval_with_rounds(
 		current_best = _get_point_name(current_points, current_diff)
 
 		current_best_index, current_distance = get_closest_index(
-			r.target, current_points.to_numpy(), use_haversine=use_haversine
+			r.target, current_points.point_array, use_haversine=use_haversine
 		)
 		if current_distance < current_diff.player_distance:
 			old_best = current_best
-			current_best = current_points.index[current_best_index]
+			current_best: str = current_points.points.index[current_best_index]
 			print(
 				f'Round {r.name} would already be improved by {current_best} over {old_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
 			)
@@ -194,7 +202,10 @@ def eval_with_rounds(
 				# Unless we just won the round
 				if new_rank == 1:
 					continue
-				new_current_point = current_points[current_best]
+				new_current_point = current_points.points[current_best]
+				assert isinstance(new_current_point, Point), (
+					f'new_current_point was {type(new_current_point)}, expected Point, this should not be loaded that way'
+				)
 				current_diff = find_new_next_highest_distance(
 					r,
 					name,
@@ -242,7 +253,7 @@ def eval_with_rounds(
 	df = pandas.DataFrame(rows)
 	df = df.dropna(how='all', axis='columns')
 	if output_path:
-		df.to_csv(output_path, index=False)
+		await asyncio.to_thread(df.to_csv, output_path, index=False)
 	print(
 		format_dataframe(
 			df.drop(columns='rival_pic', errors='ignore'), ('new_dist', 'rival_dist', 'amount')
@@ -267,10 +278,11 @@ def eval_with_rounds(
 	print(format_dataframe(grouped, ('total_diff', 'mean_diff', 'max_diff')))
 
 
-def main() -> None:
+async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
-		'existing_points', type=Path, help='Your existing set of points, as .csv/.ods/.geojson/etc'
+		'existing_points',
+		help='Your existing set of points, as a path to a .csv/.ods/.geojson/etc file, or player:<player display name> or username:<Discord username> to use points that are known to be submitted',
 	)
 	argparser.add_argument(
 		'new_points', type=Path, help='New points to evaluate, as .csv/.ods/.geojson/etc'
@@ -317,7 +329,7 @@ def main() -> None:
 	argparser.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to true',
+		help='Use haversine for distances, defaults to true for consistency with main TPG',
 		default=True,
 	)
 	argparser.add_argument(
@@ -329,13 +341,11 @@ def main() -> None:
 	# TODO: Allow specifying either username or player display name for --player, in some intuitive/non-stupid way
 	args = argparser.parse_args()
 
-	points = load_points(args.existing_points)
-	new_points = load_points(args.new_points)
-
-	points = try_set_index_name_col(points)
+	points = await load_point_set_from_arg(args.existing_points)
+	new_points = await load_points_async(args.new_points)
 	new_points = try_set_index_name_col(new_points)
 
-	distances = get_distances(points, new_points)
+	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
 	if args.threshold:
 		num_under = (distances['distance'] < args.threshold).sum()
 		if num_under:
@@ -351,9 +361,11 @@ def main() -> None:
 	distances = distances.drop(columns='coords')
 
 	if args.distances_output_path:
-		output_geodataframe(distances, args.distances_output_path, index=False)
+		await asyncio.to_thread(
+			output_geodataframe, distances, args.distances_output_path, index=False
+		)
 	if args.targets:
-		eval_with_targets(
+		await eval_with_targets(
 			points,
 			new_points,
 			args.targets,
@@ -362,8 +374,8 @@ def main() -> None:
 			use_haversine=args.use_haversine,
 		)
 	if args.rounds_path:
-		eval_with_rounds(
-			points.geometry,
+		await eval_with_rounds(
+			points,
 			new_points.geometry,
 			args.rounds_path,
 			args.name,
@@ -375,4 +387,4 @@ def main() -> None:
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
 	with logging_redirect_tqdm():
-		main()
+		asyncio.run(main())
