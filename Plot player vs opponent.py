@@ -8,22 +8,29 @@ import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import contextily
 import geopandas
 from matplotlib import pyplot
-from shapely import Point
+from shapely import Point, prepare
 from tqdm.auto import tqdm
 from travelpygame import PointSet, get_best_pic
-from travelpygame.util.point_construction import get_fixed_grid
+from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
 
 from lib.io_utils import load_point_set_from_arg
 
-logger = logging.getLogger(Path(__file__).stem)
+if TYPE_CHECKING:
+	from shapely.geometry.base import BaseGeometry
 
 
 def get_grid(
-	left_player: PointSet, right_player: PointSet, resolution: float, *, limit_grid_to_bbox: bool
+	left_player: PointSet,
+	right_player: PointSet,
+	resolution: float,
+	*,
+	use_boxes: bool,
+	limit_grid_to_bbox: bool,
 ):
 	if limit_grid_to_bbox:
 		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
@@ -38,55 +45,107 @@ def get_grid(
 		min_y = -89
 		max_x = 179
 		max_y = 89
-	point_grid: geopandas.GeoSeries = get_fixed_grid(min_x, min_y, max_x, max_y, resolution)
-	return point_grid.reset_index(drop=True)
-	# TODO: Boxes would be more ideal than points, but also more complicated
+	# Assume crs is wgs84 for now
+	return (
+		get_fixed_box_grid(min_x, min_y, max_x, max_y, resolution)
+		if use_boxes
+		else get_fixed_grid(min_x, min_y, max_x, max_y, resolution)
+	)
+
+
+def get_first_index_inside(geom: 'BaseGeometry', point_set: PointSet):
+	is_within = point_set.points.within(geom)
+	if not is_within.any():
+		return None
+	within = point_set.points[is_within]
+	return within.index[0]
+
+
+def get_winner(geom: 'BaseGeometry', left_player: PointSet, right_player: PointSet):
+	if not isinstance(geom, Point):
+		prepare(geom)
+		point = geom.representative_point()
+		left_in_box = get_first_index_inside(geom, left_player)
+		right_in_box = get_first_index_inside(geom, right_player)
+		if left_in_box:
+			if right_in_box:
+				return 'tie', left_in_box, right_in_box
+			return 'left', left_in_box, get_best_pic(right_player, point)
+		if right_in_box:
+			# and not left_in_box
+			return 'right', right_in_box, get_best_pic(left_player, point)
+	else:
+		point = geom
+	# TODO: Handle boxes where neither player has a point inside but they could win depending on what point of the box the target was (would need to think about that)
+	left_best_pic, left_distance = get_best_pic(left_player, point)
+	right_best_pic, right_distance = get_best_pic(right_player, point)
+	if left_distance == right_distance:
+		# Unlikely but might as well handle this case
+		result = 'tie'
+	elif left_distance < right_distance:
+		result = 'left'
+	else:
+		result = 'right'
+	return result, left_best_pic, right_best_pic
 
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
-	left_player_opts = argparser.add_argument_group(
+	left_player_arg_group = argparser.add_argument_group(
 		'Left player options', 'Options for the "left" player.'
 	)
-	right_player_opts = argparser.add_argument_group(
+	right_player_arg_group = argparser.add_argument_group(
 		'Right player options', 'Options for the "right" player.'
 	)
-	left_player_opts.add_argument(
+	grid_args_group = argparser.add_argument_group(
+		'Grid arguments', 'Arguments to control creation of the grid'
+	)
+	plot_args_group = argparser.add_argument_group(
+		'Plotting arguments', 'Arguments to control how things are plotted'
+	)
+
+	left_player_arg_group.add_argument(
 		'left_player',
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
-	left_player_opts.add_argument(
+	left_player_arg_group.add_argument(
 		'--left-name-col',
 		help='Force a specific column label for the name of each point, otherwise autodetect',
 	)
-	left_player_opts.add_argument(
+	left_player_arg_group.add_argument(
 		'--left-colour',
 		help='Colour to plot where the left player is closer, defaults to red for no particular reason.',
 		default='red',
 	)
-	right_player_opts.add_argument(
+	right_player_arg_group.add_argument(
 		'right_player',
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc), or or player:<player display name> or username:<player username>, which will load all the submissions for a particular player.',
 	)
-	right_player_opts.add_argument(
+	right_player_arg_group.add_argument(
 		'--right-name-col',
 		help='Force a specific column label for the name of each point, otherwise autodetect',
 	)
-	right_player_opts.add_argument(
+	right_player_arg_group.add_argument(
 		'--right-colour',
 		help='Colour to plot where the left player is closer, defaults to blue for no particular reason.',
 		default='blue',
 	)
 
-	# TODO: --lat-column/--lng-column/--unheadered/--crs options for each player but I can't be arsed making them for both
+	# TODO: --lat-column/--lng-column/--unheadered/--crs options for each player but I can't be arsed making them for both, and also both players need to be the same crs or that would just be screwy
 
-	argparser.add_argument(
+	grid_args_group.add_argument(
+		'--use-boxes',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Use boxes instead of points (and compute distances to an arbitrary point on the box which will usually end up being the middle), defaults to true. If players have points inside a box, distances will not be computed, and whichever player has a point in the box will win that box (or if both they will tie).',
+	)
+	grid_args_group.add_argument(
 		'--resolution',
 		type=float,
 		default=1.0,
 		help='Resolution of points to plot distances to, higher resolutions (smaller values) will be more computationally intensive. Defaults to 1 decimal degree.',
 	)
-	argparser.add_argument(
+	grid_args_group.add_argument(
 		'--limit-grid-to-bbox',
 		action=BooleanOptionalAction,
 		default=False,
@@ -101,45 +160,64 @@ async def main() -> None:
 		dest='output_path',
 		help='Location to save map as an image, instead of showing',
 	)
-	argparser.add_argument(
+	plot_args_group.add_argument(
 		'--marker-size',
 		type=float,
 		default=1.0,
 		help='Size of dots on map, defaults to 1.0, you may want to fiddle with this so they overlap enough to not look like dots',
 	)
-	# TODO: Options for colour map, basemap provider, etc
+	plot_args_group.add_argument(
+		'--tie-colour',
+		'--tie-color',
+		default='yellow',
+		help='Colour to use for boxes that both players have a point in, defaults to yellow.',
+	)
+	# TODO: Options for alpha, basemap provider, etc
 
 	args = argparser.parse_args()
 
 	left_player = await load_point_set_from_arg(args.left_player, name_col=args.left_name_col)
 	right_player = await load_point_set_from_arg(args.right_player, name_col=args.right_name_col)
 
-	point_grid = get_grid(
-		left_player, right_player, args.resolution, limit_grid_to_bbox=args.limit_grid_to_bbox
+	use_boxes: bool = args.use_boxes
+	grid = get_grid(
+		left_player,
+		right_player,
+		args.resolution,
+		use_boxes=use_boxes,
+		limit_grid_to_bbox=args.limit_grid_to_bbox,
 	)
 
 	left_best_pics = {}
 	right_best_pics = {}
 	colours = {}
-	for index, point in tqdm(
-		point_grid.items(), 'Computing distances to points', total=point_grid.size, unit='point'
-	):
-		assert isinstance(point, Point), f'Why is point {index} a {type(point)} and not a Point'
-		left_best_pic, left_distance = get_best_pic(left_player.point_array, point)
-		right_best_pic, right_distance = get_best_pic(right_player.point_array, point)
-		# TODO: Handle ties (or at least log them) instead of giving right player the win, though for now that is very unlikely to happen
-		colours[index] = args.left_colour if left_distance < right_distance else args.right_colour
-		left_best_pics[index] = left_best_pic
-		right_best_pics[index] = right_best_pic
+
+	with tqdm(
+		grid.items(),
+		'Computing distances to ' + ('boxes' if use_boxes else 'points'),
+		total=grid.size,
+		unit='box' if use_boxes else 'point',
+	) as t:
+		for index, geom in t:
+			t.set_postfix(index=index, point=geom.representative_point())
+			result, left_best_pic, right_best_pic = get_winner(geom, left_player, right_player)
+			if result == 'left':
+				colour = args.left_colour
+			elif result == 'right':
+				colour = args.right_colour
+			else:
+				colour = args.tie_colour
+			colours[index] = colour
+			left_best_pics[index] = left_best_pic
+			right_best_pics[index] = right_best_pic
 
 	gdf = geopandas.GeoDataFrame(
 		{
-			'point': point_grid,
+			'geometry': grid,
 			'colour': colours,
 			'left_best': left_best_pics,
 			'right_best': right_best_pics,
 		},
-		geometry='point',
 		crs='wgs84',
 	)
 	print(gdf)
@@ -149,7 +227,7 @@ async def main() -> None:
 		color=gdf['colour'],
 		legend=False,
 		ax=ax,
-		markersize=args.marker_size,
+		markersize=None if use_boxes else args.marker_size,
 		alpha=0.3,
 		legend_kwds={'shrink': 0.4},
 	)
@@ -165,4 +243,5 @@ async def main() -> None:
 
 
 if __name__ == '__main__':
+	logging.basicConfig(level=logging.INFO)
 	asyncio.run(main())
