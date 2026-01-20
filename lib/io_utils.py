@@ -73,6 +73,7 @@ async def load_path_or_player(
 
 	gdf = gdf.set_index(name_col) if name_col else try_set_index_name_col(gdf)
 	if isinstance(gdf.index, pandas.RangeIndex):
+		logger.info('%s had default index, formatting points', path_or_name)
 		gdf.index = pandas.Index(gdf.geometry.map(format_point))
 	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
 	return gdf.drop(index=list(to_drop)) if to_drop else gdf
