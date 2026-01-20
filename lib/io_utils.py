@@ -49,26 +49,29 @@ async def load_path_or_player(
 	name_col: str | None = None,
 	*,
 	force_unheadered: bool = False,
-) -> 'GeoDataFrame':
+) -> tuple[str, 'GeoDataFrame']:
 	if path_or_name.startswith('player:'):
-		player_name = path_or_name.removeprefix('player:')
+		name = player_name = path_or_name.removeprefix('player:')
 		username = await get_player_username(player_name)
 		if username is None:
 			raise KeyError(f'No player with display name {player_name} found')
 		gdf = await _load_by_username(username)
 	elif path_or_name.startswith('username:'):
-		gdf = await _load_by_username(path_or_name.removeprefix('username:'))
+		name = username = path_or_name.removeprefix('username:')
+		gdf = await _load_by_username(username)
 	else:
+		path = Path(path_or_name)
+		name = path.stem
 		gdf = await load_points_async(
-			path_or_name,
+			path,
 			lat_col,
 			lng_col,
 			crs=crs_arg or 'wgs84',
 			has_header=False if force_unheadered else None,
 		)
-	assert gdf.crs, 'gdf had no crs, which should never happen'
+	assert gdf.crs, f'gdf {name} had no crs, which should never happen'
 	if not gdf.crs.is_geographic:
-		logger.warning('gdf had non-geographic CRS %s, converting to WGS84')
+		logger.warning('%s had non-geographic CRS %s, converting to WGS84', name, gdf.crs)
 		gdf = gdf.to_crs('wgs84')
 
 	gdf = gdf.set_index(name_col) if name_col else try_set_index_name_col(gdf)
@@ -76,7 +79,7 @@ async def load_path_or_player(
 		logger.info('%s had default index, formatting points', path_or_name)
 		gdf.index = pandas.Index(gdf.geometry.map(format_point))
 	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
-	return gdf.drop(index=list(to_drop)) if to_drop else gdf
+	return name, gdf.drop(index=list(to_drop)) if to_drop else gdf
 
 
 async def load_point_set_from_arg(
@@ -88,8 +91,8 @@ async def load_point_set_from_arg(
 	projected_crs_arg: str | None = None,
 	*,
 	force_unheadered: bool = False,
-):
-	gdf = await load_path_or_player(
+) -> PointSet:
+	name, gdf = await load_path_or_player(
 		path_or_name, lat_col, lng_col, crs_arg, name_col, force_unheadered=force_unheadered
 	)
 	if projected_crs_arg:
@@ -97,8 +100,10 @@ async def load_point_set_from_arg(
 	else:
 		projected_crs = get_projected_crs(gdf)
 		if projected_crs:
-			print(f'Autodetected CRS: {projected_crs.name} {projected_crs.srs}')
+			logger.info('%s: Autodetected CRS: %s %s', name, projected_crs.name, projected_crs.srs)
 		else:
-			print('Unable to autodetect CRS, this will result in using a generic one')
+			logger.warning(
+				'%s: Unable to autodetect CRS, this will result in using a generic one', name
+			)
 
-	return PointSet(gdf, projected_crs)
+	return PointSet(gdf, name, projected_crs)
