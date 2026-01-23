@@ -1,17 +1,22 @@
+import asyncio
 import logging
+from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas
 from async_lru import alru_cache
+from tqdm.auto import tqdm
 from travelpygame import (
 	PointSet,
 	load_or_fetch_per_player_submissions,
+	load_points,
 	load_points_async,
 	validate_points,
 )
 from travelpygame.tpg_data import get_player_username
 from travelpygame.util import format_point, try_set_index_name_col
+from travelpygame.util.io_utils import dataframe_exts, known_geo_exts, maybe_load_geodataframe
 
 from .settings import Settings
 
@@ -97,3 +102,42 @@ async def load_point_set_from_arg(
 	)
 
 	return PointSet(gdf, name, projected_crs_arg)
+
+
+def _listdir_sync(path: Path):
+	return list(path.iterdir())
+
+
+async def listdir_async(path: Path):
+	return await asyncio.to_thread(_listdir_sync, path)
+
+
+def load_point_sets_from_folder(
+	folder: Path,
+	extensions: Collection[str] | None = None,
+	*,
+	force_all: bool = False,
+	use_tqdm: bool = True,
+):
+	"""Loads a list of PointSet objects from a folder. Will always load .geojson/.gpkg files, additional extensions can be specified."""
+	frames: dict[Path, GeoDataFrame] = {}
+	geo_exts = {*known_geo_exts, *extensions} if extensions else known_geo_exts
+	with tqdm(_listdir_sync(folder), f'Loading files in {folder.stem}', disable=not use_tqdm) as t:
+		for child in t:
+			t.set_postfix(child=child.stem)
+			if child.is_dir():
+				continue
+			ext = child.suffix[1:].lower()
+			# TODO: Is there a better way to know whether a file is one we want before we try loading it? Catching any sort of unknown file error relies on having a specific GeoPandas engine, pyogrio uses pyogrio.errors.DataSourceError and fiona uses fiona.errors.DriverError
+			if ext in dataframe_exts or ext in geo_exts:
+				gdf = load_points(child, use_tqdm=False)
+				gdf = try_set_index_name_col(gdf)
+				frames[child] = gdf
+			elif force_all:
+				gdf = maybe_load_geodataframe(child, use_tqdm=False)
+				if gdf is None:
+					logger.debug('Skipping unsupported file %s', child)
+				else:
+					gdf = try_set_index_name_col(gdf)
+					frames[child] = gdf
+	return [PointSet(gdf, path.stem) for path, gdf in frames.items()]

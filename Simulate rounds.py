@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import shapely
+from aiohttp import ClientSession
 from pandas import Index, RangeIndex
-from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import (
 	PointSet,
 	Round,
@@ -27,8 +28,8 @@ from travelpygame.simulation import (
 	get_player_podium_or_losing_points,
 	get_player_summary,
 	get_round_summary,
-	simulate_existing_rounds,
 )
+from travelpygame.tpg_api import get_players
 from travelpygame.tpg_data import PlayerUsername, rounds_to_json
 from travelpygame.util import (
 	format_point,
@@ -38,6 +39,7 @@ from travelpygame.util import (
 	try_set_index_name_col,
 )
 
+from lib.io_utils import load_point_sets_from_folder
 from lib.settings import Settings
 
 if TYPE_CHECKING:
@@ -76,15 +78,17 @@ def get_simulation(
 	*,
 	use_haversine: bool,
 ) -> Simulation:
-	if not targets_path and not num_random_rounds:
-		if existing_rounds is None:
-			raise RuntimeError('You have nothing to simulate')
-		return simulate_existing_rounds(
-			existing_rounds, point_sets, scoring, strategy, use_haversine=use_haversine
-		)
+	rounds: dict[str, shapely.Point] = {}
+	order: dict[str, int] = {}
 
-	if targets_path:
+	if existing_rounds:
+		for r in existing_rounds:
+			round_name = r.name or f'Round {r.number}'
+			rounds[round_name] = r.target
+			order[round_name] = r.number
+	elif targets_path:
 		targets = load_with_name(targets_path)
+		# Should we log about stuff that isn't a Point?
 		rounds = {
 			str(index): point
 			for index, point in targets.geometry.items()
@@ -101,8 +105,10 @@ def get_simulation(
 			points = [random_point_in_bbox(-180, -90, 180, 90) for _ in range(num_random_rounds)]
 		rounds = {format_point(point): point for point in points}
 	else:
-		raise RuntimeError('Not sure how we got here')
-	return Simulation(rounds, None, point_sets, scoring, strategy, use_haversine=use_haversine)
+		raise RuntimeError('You have no rounds to be simulated')
+	return Simulation(
+		rounds, order or None, point_sets, scoring, strategy, use_haversine=use_haversine
+	)
 
 
 def output_results(
@@ -140,6 +146,7 @@ def output_results(
 
 
 def load_with_name(path: Path | str):
+	"""Loads points from `path` with names for each point. Might not be needed anymore."""
 	points = load_points(path)
 	points = try_set_index_name_col(points)
 	if isinstance(points.index, RangeIndex):
@@ -153,24 +160,39 @@ def load_with_name(path: Path | str):
 	return points
 
 
-def get_pics(
-	subs_per_user: Mapping[PlayerUsername, 'GeoDataFrame'],
+async def load_point_sets(
+	subs_per_user: Mapping[PlayerUsername, 'GeoDataFrame'] | None,
 	name: str | None,
 	points_path: Path | None,
 	threshold: int | None,
-	additional_players: list[list[str]] | None,
+	additional_folders: list[Path] | None,
+	additional_players_args: list[list[str]] | None,
+	*,
+	load_per_user: bool,
 ) -> list[PointSet]:
-	pics = {
-		player: player_pics
-		for player, player_pics in subs_per_user.items()
-		if threshold is None or player_pics.index.size >= threshold
-	}
-	if additional_players:
-		for additional_name, path in additional_players:
-			points = load_with_name(path)
-			pics[additional_name] = points
-	# TODO: Refactoring, just have a list point_sets and append them
+	if load_per_user and not subs_per_user:
+		settings = Settings()
+		async with ClientSession() as sesh:
+			subs_per_user = await load_or_fetch_per_player_submissions(
+				settings.subs_per_player_path, session=sesh
+			)
+			players = await get_players(sesh)
+		player_names = {
+			player.username: player.name or player.username or player.discord_id
+			for player in players
+		}
+	else:
+		player_names = {}
 
+	gdf_per_user = (
+		{
+			player_names.get(player_username, player_username): player_pics
+			for player_username, player_pics in subs_per_user.items()
+			if threshold is None or player_pics.index.size >= threshold
+		}
+		if subs_per_user
+		else {}
+	)
 	if points_path:
 		if not name:
 			print(
@@ -178,29 +200,51 @@ def get_pics(
 			)
 		else:
 			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			pics[name] = load_with_name(points_path)
-	if not pics:
+			gdf_per_user[name] = await asyncio.to_thread(load_with_name, points_path)
+	point_sets = [PointSet(gdf, name) for name, gdf in gdf_per_user.items()]
+
+	if additional_folders:
+		for folder in additional_folders:
+			point_sets += load_point_sets_from_folder(folder)
+
+	if additional_players_args:
+		for additional_name, path in additional_players_args:
+			points = await asyncio.to_thread(load_with_name, path)
+			point_sets.append(PointSet(points, additional_name))
+
+	if not point_sets:
 		raise RuntimeError('Nobody is able to be simulated')
-	return [PointSet(gdf, name) for name, gdf in tqdm(pics.items(), 'Loading pics')]
+	return point_sets
 
 
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	strategy_choices = {s.name.lower(): s for s in SimulatedStrategy}
-	argparser.add_argument(
-		'submissions_path',
-		type=Path,
-		help='Path to either a geofile with a "player" column to get submissions per player, or to TPG data to get per-user submissions and to use the rounds as targets if targets is not specified',
-	)
-	argparser.add_argument(
-		'--name',
-		help='Optionally keep track of a particular player (likely use case = yourself) and how their submission changes',
-	)
 
 	target_args = argparser.add_argument_group(
 		'Target arguments', 'Which locations will be the targets of each simulated round'
 	)
+	sim_args = argparser.add_argument_group(
+		'Simulation arguments', 'Arguments controlling how the simulation is simulated'
+	)
+	player_args = argparser.add_argument_group(
+		'Player arguments',
+		'Arguments to control what simulated players exist and what pics they have',
+	)
+	output_args = argparser.add_argument_group(
+		'Output arguments', 'Arguments specifying what is output and where'
+	)
+
+	argparser.add_argument(
+		'--name',
+		help='Optionally keep track of a particular player (likely use case = yourself) and their results, and optionally to load a replacement for their point set',
+	)
+
 	exclusive_target_args = target_args.add_mutually_exclusive_group(required=False)
+	exclusive_target_args.add_argument(
+		'--rounds-path', '--rounds', type=Path, help='Load rounds to re-simulate as the target'
+	)
+	# TODO: More fine-grained arguments to load or not load players from --rounds-path if that is provided, and also targets
 	exclusive_target_args.add_argument(
 		'--targets',
 		type=Path,
@@ -216,9 +260,6 @@ def main() -> None:
 		help='With --random-rounds, generate points within a region instead of anywhere in the world',
 	)
 
-	sim_args = argparser.add_argument_group(
-		'Simulation arguments', 'Arguments controlling how the simulation is simulated'
-	)
 	sim_args.add_argument(
 		'--custom-scoring',
 		type=float,
@@ -233,13 +274,10 @@ def main() -> None:
 	sim_args.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to true',
+		help='Use haversine for distances, defaults to true for consistency with main TPG',
 		default=True,
 	)
 
-	output_args = argparser.add_argument_group(
-		'Output arguments', 'Arguments specifying what is output and where'
-	)
 	output_args.add_argument(
 		'--output-path', type=Path, help='Output simulated rounds as a TPG data file'
 	)
@@ -267,9 +305,11 @@ def main() -> None:
 		help='With --name, output rounds where that player loses here',
 	)
 
-	player_args = argparser.add_argument_group(
-		'Pics arguments',
-		'Arguments to control what simulated players exist and what pics they have',
+	player_args.add_argument(
+		'--load-per-player-submissions',
+		action=BooleanOptionalAction,
+		default=True,
+		help="Load simulated players from all real TPG players, getting known submissions from main TPG data + Morphior's opponent checker data. Defaults to true",
 	)
 	player_args.add_argument(
 		'--points-path',
@@ -282,6 +322,13 @@ def main() -> None:
 		help='Only simulate players who have submitted at least this amount of pics. This can help speed up the simulation',
 	)
 	player_args.add_argument(
+		'--add-from-folder',
+		'--add-from-directory',
+		action='append',
+		type=Path,
+		help='Add new players from every supported file found in a folder, using the filenames as the player name (does not recurse into subdirectories, because that would be getting a bit too wild)',
+	)
+	player_args.add_argument(
 		'--add-player',
 		'--additional-player',
 		dest='add_player',
@@ -290,13 +337,13 @@ def main() -> None:
 		metavar=('name', 'point_set_path'),
 		help='Add a new player with a name and points from a file (pair of arguments in that order, can be specified multiple times)',
 	)
-	# TODO: Option to _not_ load players from TPG data
 	# Everything should be optional here, and subs_per_user and targets should be completely separate, but by default load the former as usual and use main TPG data for the latter but have options to not do that, just throw an error if we end up with no players or no points
 	# TODO: Grid of points for target
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()
 
-	path: Path = args.submissions_path
+	rounds_path: Path | None = args.rounds_path
+	# Nitpick: Pretty sure how ArgumentParser works is that if --rounds-path is not specified, it is Path('') and not None, so the type hint is technically inaccurate but pretending that it can be None ensures the type checker catches errors in handling it not being set, so it's probably better that way
 	name: str | None = args.name
 	points_path: Path | None = args.points_path
 	targets_path: Path | None = args.targets
@@ -305,6 +352,7 @@ def main() -> None:
 
 	strategy = strategy_choices[args.strategy]
 	if args.custom_scoring:
+		# TODO: Probably want to have some ability to load options from a file or something
 		scoring = ScoringOptions(
 			fivek_flat_score=7500,
 			fivek_bonus=None,
@@ -315,16 +363,24 @@ def main() -> None:
 	else:
 		scoring = main_tpg_scoring
 
-	# TODO: Rejiggle this, loading any of this should be optional
-	settings = Settings()
-	existing_rounds = load_rounds(path) if path.suffix[1:].lower() == 'json' else None
+	# TODO: Use main TPG data for existing_rounds by default
+	existing_rounds = load_rounds(rounds_path) if rounds_path else None
 
-	subs_per_user = asyncio.run(load_or_fetch_per_player_submissions(settings.subs_per_player_path))
-
-	pics = get_pics(subs_per_user, name, points_path, args.threshold, args.add_player)
+	# TODO: (Optionally) get players from existing_rounds
+	point_set = asyncio.run(
+		load_point_sets(
+			None,
+			name,
+			points_path,
+			args.threshold,
+			args.add_from_folder,
+			args.add_player,
+			load_per_user=args.load_per_player_submissions,
+		)
+	)
 	simulation = get_simulation(
 		existing_rounds,
-		pics,
+		point_set,
 		scoring,
 		strategy,
 		targets_path,
@@ -352,9 +408,11 @@ def main() -> None:
 	)
 	output_path: Path | None = args.output_path
 	if output_path:
+		# TODO: How do we stop this being _too_ large? Should we just compress it?
 		output_path.write_text(rounds_to_json(new_rounds), 'utf-8')
 
 
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
-	main()
+	with logging_redirect_tqdm():
+		main()
