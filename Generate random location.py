@@ -38,6 +38,7 @@ async def _random_single_point_in_poly(
 	seed: int | None,
 	*,
 	stats: bool,
+	reverse_geocode: bool,
 ):
 	async with ClientSession() as sesh:
 		raw_point = random_point_in_poly(
@@ -49,7 +50,7 @@ async def _random_single_point_in_poly(
 			data = _get_point_data(raw_point, gdf, value_cols)
 			for k, v in data.items():
 				print(f'{k}: {v}')
-		else:
+		elif reverse_geocode:
 			desc = await describe_point(point, sesh)
 			print(desc)
 		if stats and poly:
@@ -189,7 +190,14 @@ async def main() -> None:
 
 	if n == 1:
 		await _random_single_point_in_poly(
-			poly, gdf, to_wgs84, to_utm, value_cols, seed, stats=args.stats
+			poly,
+			gdf,
+			to_wgs84,
+			to_utm,
+			value_cols,
+			seed,
+			stats=args.stats,
+			reverse_geocode=args.reverse_geocode,
 		)
 	else:
 		points = await _random_points_in_poly(
