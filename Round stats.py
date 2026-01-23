@@ -4,6 +4,7 @@
 import asyncio
 import logging
 from argparse import ArgumentParser
+from itertools import chain
 from pathlib import Path
 
 import numpy
@@ -41,8 +42,12 @@ async def main() -> None:
 
 	rounds = await load_rounds_async(args.path)
 	world_distance: float = args.world_distance * 1_000
-	total_bounds = get_total_bounds(r.target for r in rounds)
-	print(f'Total bounds: {total_bounds}')
+	all_rounds = [r.target for r in rounds]
+	total_bounds = get_total_bounds(all_rounds)
+	print(f'Total bounds of rounds: {total_bounds}')
+	all_submissions = list(chain.from_iterable(r.submissions for r in rounds))
+	all_submission_points = [s.point for s in all_submissions]
+	print(f'Total bounds of submissions: {get_total_bounds(all_submission_points)}')
 
 	if args.projected_crs:
 		projected_crs = pyproj.CRS.from_user_input(args.projected_crs)
