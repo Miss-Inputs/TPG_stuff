@@ -272,7 +272,7 @@ async def eval_with_rounds(
 			'max_diff': groupby['amount'].max(),
 		}
 	)
-	not_used = ', '.join(frozenset(new_points.index).difference(groupby.groups))
+	not_used = ', '.join(str(s) for s in frozenset(new_points.index).difference(groupby.groups))
 	print(f'Not used: {not_used}')
 	grouped = grouped.sort_values('total_diff', ascending=False)
 	print(format_dataframe(grouped, ('total_diff', 'mean_diff', 'max_diff')))
@@ -344,6 +344,13 @@ async def main() -> None:
 	points = await load_point_set_from_arg(args.existing_points)
 	new_points = await load_points_async(args.new_points)
 	new_points = try_set_index_name_col(new_points)
+	if isinstance(new_points.index, RangeIndex):
+		new_points.index = Index(
+			[
+				format_point(geo) if isinstance(geo, Point) else str(geo)
+				for geo in new_points.geometry
+			]
+		)
 
 	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
 	if args.threshold:
