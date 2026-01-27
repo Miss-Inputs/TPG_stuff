@@ -4,7 +4,6 @@
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -116,8 +115,8 @@ def main() -> None:
 			)
 
 	df = pandas.DataFrame({'dest': names, 'best_pic': best_pics, 'distance': distances})
-	with suppress(ValueError):
-		df = df.set_index('dest', verify_integrity=True)
+	if df['dest'].is_unique:
+		df = df.set_index('dest')
 	df = df.sort_values('distance')
 
 	print(format_dataframe(df, 'distance'))
