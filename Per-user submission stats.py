@@ -13,7 +13,12 @@ import pandas
 import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import PointSet, find_furthest_point, load_or_fetch_per_player_submissions
+from travelpygame import (
+	PointSet,
+	find_furthest_point,
+	load_or_fetch_per_player_submissions,
+	output_geodataframe,
+)
 from travelpygame.tpg_api import get_session
 from travelpygame.tpg_data import get_player_display_names
 from travelpygame.util import (
@@ -110,6 +115,9 @@ async def main() -> None:
 		default=False,
 		help='Find the furthest possible point on the planet for each player. Defaults to false.',
 	)
+	argparser.add_argument(
+		'--concave-hull-output-path', type=Path, help='Path to save concave hulls'
+	)
 
 	args = argparser.parse_args()
 	path: Path | None = args.path
@@ -160,11 +168,16 @@ async def main() -> None:
 	geopandas.GeoDataFrame(stats[['name', 'centroid']], geometry='centroid', crs='wgs84').to_file(
 		'/tmp/centroids.geojson'
 	)
-	geopandas.GeoDataFrame(
-		stats[['name', 'concave_hull', 'concave_hull_area', 'concave_hull_perimeter']],
-		geometry='concave_hull',
-		crs='wgs84',
-	).dropna().to_file('/tmp/concave_hulls.geojson')
+
+	concave_hull_path: Path | None = args.concave_hull_output_path
+	if concave_hull_path:
+		concave_hulls = geopandas.GeoDataFrame(
+			stats[['name', 'concave_hull', 'concave_hull_area', 'concave_hull_perimeter']],
+			geometry='concave_hull',
+			crs='wgs84',
+		)
+		concave_hulls = concave_hulls.dropna()
+		await asyncio.to_thread(output_geodataframe, concave_hulls, concave_hull_path)
 
 
 if __name__ == '__main__':
