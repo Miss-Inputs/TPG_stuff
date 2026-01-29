@@ -1,78 +1,88 @@
 #!/usr/bin/env python3
-"""Gets stats for all players. This is stil a bit of a mess and this docstring isn't even very good."""
+"""Gets stats for all players. This is stil a bit of a mess and this docstring isn't even very good. For now, the paths it outputs to are hardcoded and dump files into /tmp."""
 
 import asyncio
 import logging
 from argparse import ArgumentParser
+from collections.abc import Collection
+from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
-from travelpygame import find_furthest_point, load_or_fetch_per_player_submissions
+from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame import PointSet, find_furthest_point, load_or_fetch_per_player_submissions
+from travelpygame.tpg_api import get_session
+from travelpygame.tpg_data import get_player_display_names
 from travelpygame.util import (
 	circular_mean_points,
 	format_dataframe,
 	format_point,
 	geod_distance,
-	get_centroid,
+	get_geometry_antipode,
 	wgs84_geod,
 )
 
 from lib.settings import Settings
 
 
-def concave_hull_of_player(all_points: shapely.MultiPoint):
-	if len(all_points.geoms) == 1:
-		return None, 0, 0
-	if len(all_points.geoms) == 2:
-		point_1, point_2 = all_points.geoms
+@dataclass
+class HullInfo:
+	hull: shapely.Polygon | None
+	area: float
+	perimeter: float
+
+
+def get_concave_hull_info(point_set: PointSet):
+	if point_set.count == 1:
+		return HullInfo(None, 0, 0)
+	if point_set.count == 2:
+		point_1, point_2 = point_set.point_array
 		assert isinstance(point_1, shapely.Point), type(point_1)
 		assert isinstance(point_2, shapely.Point), type(point_1)
 		distance = geod_distance(point_1, point_2)
-		return None, distance, distance
-	hull = shapely.concave_hull(all_points, allow_holes=True)
+		return HullInfo(None, distance, distance)
+	hull = point_set.concave_hull
 	area, perimeter = wgs84_geod.geometry_area_perimeter(hull)
 	area = abs(area)
+	if not isinstance(hull, shapely.Polygon):
+		tqdm.write(f'Huh? Concave hull for {point_set.name} is a {type(hull)}, expected Polygon')
+		hull = None
 
-	return hull, area, perimeter
+	return HullInfo(hull, area, perimeter)
 
 
-def stats_for_each_player(
-	per_player: dict[str, geopandas.GeoSeries], threshold: int | None = None
-) -> pandas.DataFrame:
-	if threshold:
-		per_player = {
-			name: points for name, points in per_player.items() if points.size >= threshold
-		}
+def stats_for_each_player(point_sets: Collection[PointSet]) -> pandas.DataFrame:
 	data = {}
-	with tqdm(per_player.items(), 'Calculating stats', unit='player') as t:
-		for name, points in t:
-			t.set_postfix(name=name)
+	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
+		for point_set in t:
+			t.set_postfix(name=point_set.name)
 			# TODO: These should all be parameters whether to calculate each particular stat or not
-			# crs = geo.estimate_utm_crs()
-			# Using that for get_centroid seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
-			all_points = points.to_numpy()
-			all_points_mp = shapely.MultiPoint(all_points)
-			hull = concave_hull_of_player(all_points_mp)
+			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
+			concave_hull = get_concave_hull_info(point_set)
+			anticentroid = get_geometry_antipode(point_set.centroid)
 			furthest_point, furthest_distance = find_furthest_point(
-				all_points, max_iter=1000, use_tqdm=False
+				point_set.point_array, anticentroid, max_iter=1000, use_tqdm=False
 			)
 			stats = {
-				'count': points.size,
-				'average_point': circular_mean_points(points),
-				'centroid': get_centroid(all_points_mp),
+				'count': point_set.count,
+				'average_point': circular_mean_points(point_set.point_array),
+				'centroid': point_set.centroid,
+				'anticentroid': anticentroid,
 				'antipoint': furthest_point,
 				'furthest_distance': furthest_distance,
-				'concave_hull': hull[0],
-				'concave_hull_area': hull[1],
-				'concave_hull_perimeter': hull[2],
+				'concave_hull': concave_hull.hull,
+				'concave_hull_area': concave_hull.area,
+				'concave_hull_perimeter': concave_hull.perimeter,
 			}
-			data[name] = stats
+			data[point_set.name] = stats
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
-	return df.sort_values('concave_hull_area', ascending=False, ignore_index=True)
+	# This should be dynamic depending on what is calculated (once we have options to only calculate certain stats), and applying ascending automatically
+	sort_col = 'furthest_distance'
+	return df.sort_values(sort_col, ascending=True, ignore_index=True)
 
 
 async def main() -> None:
@@ -93,26 +103,39 @@ async def main() -> None:
 	if not path:
 		settings = Settings()
 		path = settings.subs_per_player_path
-	subs = await load_or_fetch_per_player_submissions(path)
-	all_point_sets = {player: points.geometry for player, points in subs.items()}
+	threshold: int | None = args.threshold
 
-	stats = stats_for_each_player(all_point_sets, args.threshold)
+	async with get_session() as sesh:
+		# Maybe should use aliases, I dunno
+		subs = await load_or_fetch_per_player_submissions(path, session=sesh)
+		player_names = await get_player_display_names(sesh)
+
+	all_point_sets = [
+		PointSet(gdf, player_names.get(name, name))
+		for name, gdf in subs.items()
+		if threshold is None or gdf.index.size >= threshold
+	]
+
+	stats = stats_for_each_player(all_point_sets)
 
 	print(
 		format_dataframe(
 			stats,
 			distance_cols=('concave_hull_perimeter', 'furthest_distance'),
-			point_cols=('centroid', 'average_point', 'antipoint'),
+			point_cols=('centroid', 'anticentroid', 'average_point', 'antipoint'),
 			area_cols='concave_hull_area',
 		)
 	)
+
 	# I should make these paths configurable but I didn't and haven't, and should
+	stats.to_csv('/tmp/stats.csv', index=False)
+
 	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values(
 		'furthest_distance'
 	)
 	antipoint_stats['antipoint'] = antipoint_stats['antipoint'].map(format_point)
-	antipoint_stats.to_csv('/tmp/antipoint_stats.csv', index=False)
-	stats.to_csv('/tmp/stats.csv', index=False)
+	await asyncio.to_thread(antipoint_stats.to_csv, '/tmp/antipoint_stats.csv', index=False)
+
 	geopandas.GeoDataFrame(stats[['name', 'antipoint']], geometry='antipoint', crs='wgs84').to_file(
 		'/tmp/antipoints.geojson'
 	)
@@ -131,4 +154,5 @@ async def main() -> None:
 
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
-	asyncio.run(main())
+	with logging_redirect_tqdm():
+		asyncio.run(main())
