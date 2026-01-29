@@ -29,8 +29,7 @@ from travelpygame.simulation import (
 	get_player_summary,
 	get_round_summary,
 )
-from travelpygame.tpg_api import get_players
-from travelpygame.tpg_data import PlayerUsername, rounds_to_json
+from travelpygame.tpg_data import PlayerUsername, get_player_display_names, rounds_to_json
 from travelpygame.util import (
 	format_point,
 	format_xy,
@@ -176,11 +175,7 @@ async def load_point_sets(
 			subs_per_user = await load_or_fetch_per_player_submissions(
 				settings.subs_per_player_path, session=sesh
 			)
-			players = await get_players(sesh)
-		player_names = {
-			player.username: player.name or player.username or player.discord_id
-			for player in players
-		}
+			player_names = await get_player_display_names(sesh)
 	else:
 		player_names = {}
 
