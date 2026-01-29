@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,7 +54,7 @@ def get_concave_hull_info(point_set: PointSet):
 	return HullInfo(hull, area, perimeter)
 
 
-def stats_for_each_player(point_sets: Collection[PointSet]) -> pandas.DataFrame:
+def get_stats(point_sets: Collection[PointSet], *, find_furthest: bool) -> pandas.DataFrame:
 	data = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
 		for point_set in t:
@@ -63,26 +63,32 @@ def stats_for_each_player(point_sets: Collection[PointSet]) -> pandas.DataFrame:
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
 			concave_hull = get_concave_hull_info(point_set)
 			anticentroid = get_geometry_antipode(point_set.centroid)
-			furthest_point, furthest_distance = find_furthest_point(
-				point_set.point_array, anticentroid, max_iter=1000, use_tqdm=False
-			)
-			stats = {
+			row = {
 				'count': point_set.count,
 				'average_point': circular_mean_points(point_set.point_array),
 				'centroid': point_set.centroid,
 				'anticentroid': anticentroid,
-				'antipoint': furthest_point,
-				'furthest_distance': furthest_distance,
 				'concave_hull': concave_hull.hull,
 				'concave_hull_area': concave_hull.area,
 				'concave_hull_perimeter': concave_hull.perimeter,
 			}
-			data[point_set.name] = stats
+			if find_furthest:
+				furthest_point, furthest_distance = find_furthest_point(
+					point_set.point_array, anticentroid, max_iter=1000, use_tqdm=False
+				)
+				row['antipoint'] = furthest_point
+				row['furthest_distance'] = furthest_distance
+
+			data[point_set.name] = row
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
-	# This should be dynamic depending on what is calculated (once we have options to only calculate certain stats), and applying ascending automatically
-	sort_col = 'furthest_distance'
-	return df.sort_values(sort_col, ascending=True, ignore_index=True)
+
+	sort_cols = (('furthest_distance', True), ('concave_hull_area', False), ('count', False))
+	for sort_col, sort_ascending in sort_cols:
+		if sort_col in df.columns:
+			df = df.sort_values(sort_col, ascending=sort_ascending, ignore_index=True)
+			break
+	return df
 
 
 async def main() -> None:
@@ -98,6 +104,13 @@ async def main() -> None:
 		type=int,
 		help='Only take into account players who have submitted at least this amount of pics.',
 	)
+	argparser.add_argument(
+		'--find-furthest-points',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Find the furthest possible point on the planet for each player. Defaults to false.',
+	)
+
 	args = argparser.parse_args()
 	path: Path | None = args.path
 	if not path:
@@ -116,7 +129,7 @@ async def main() -> None:
 		if threshold is None or gdf.index.size >= threshold
 	]
 
-	stats = stats_for_each_player(all_point_sets)
+	stats = get_stats(all_point_sets, find_furthest=args.find_furthest_points)
 
 	print(
 		format_dataframe(
@@ -130,15 +143,17 @@ async def main() -> None:
 	# I should make these paths configurable but I didn't and haven't, and should
 	stats.to_csv('/tmp/stats.csv', index=False)
 
-	antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values(
-		'furthest_distance'
-	)
-	antipoint_stats['antipoint'] = antipoint_stats['antipoint'].map(format_point)
-	await asyncio.to_thread(antipoint_stats.to_csv, '/tmp/antipoint_stats.csv', index=False)
+	if 'antipoint' in stats.columns:
+		antipoint_stats = stats[['name', 'antipoint', 'furthest_distance', 'count']].sort_values(
+			'furthest_distance'
+		)
+		antipoint_stats['antipoint'] = antipoint_stats['antipoint'].map(format_point)
+		await asyncio.to_thread(antipoint_stats.to_csv, '/tmp/antipoint_stats.csv', index=False)
+		antipoints = geopandas.GeoDataFrame(
+			stats[['name', 'antipoint']], geometry='antipoint', crs='wgs84'
+		)
+		await asyncio.to_thread(antipoints.to_file, '/tmp/antipoints.geojson')
 
-	geopandas.GeoDataFrame(stats[['name', 'antipoint']], geometry='antipoint', crs='wgs84').to_file(
-		'/tmp/antipoints.geojson'
-	)
 	geopandas.GeoDataFrame(
 		stats[['name', 'average_point']], geometry='average_point', crs='wgs84'
 	).to_file('/tmp/average_points.geojson')
