@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Get the address of all points in a point set from Nominatim."""
 
 import asyncio
 from argparse import ArgumentParser
@@ -44,7 +45,7 @@ async def reverse_geocode_all(gdf: 'geopandas.GeoDataFrame', column_name: Hashab
 
 
 async def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path',
 		type=Path,

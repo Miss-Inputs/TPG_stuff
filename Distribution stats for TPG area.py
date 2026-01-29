@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""For a given area used for a spinoff TPG, show the amount of area where a certain column is a certain value, e.g. show the amount of each state for a single-country TPG."""
 
 from argparse import ArgumentParser, BooleanOptionalAction
 from datetime import timedelta
@@ -9,7 +10,7 @@ from travelpygame.util import format_area, get_area, read_geodataframe
 
 
 def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path', type=Path, help='Path to GeoJSON/.gpkg/etc file containing the TPG area'
 	)

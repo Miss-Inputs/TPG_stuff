@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Use a raster file containing DEM (digital elevation model) data to get the elevation for each point in a point set, and output that as a new file with a new column."""
+
 import logging
 from argparse import ArgumentParser
 from pathlib import Path
@@ -12,7 +14,7 @@ from travelpygame import load_points, output_geodataframe
 
 
 def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path',
 		type=Path,
@@ -60,7 +62,7 @@ def main() -> None:
 		print('CRS:', dem_crs)
 		print('Upper left:', dem.transform * (0, 0))
 		print('Lower right:', dem.transform * (dem.width, dem.height))
-		
+
 		coords = shapely.get_coordinates(gdf.geometry)
 		data = [
 			None if values[0] is masked else values[0]

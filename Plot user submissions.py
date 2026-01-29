@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Plot a map with each round's location, and optionally a user's submissions for each round + lines to the target location."""
 
 from argparse import ArgumentParser
 from pathlib import Path
@@ -80,7 +81,7 @@ def plot_submissions(
 
 
 def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path', type=Path, help='Path to KML file containing each round')
 	argparser.add_argument(
 		'name', nargs='?', help='Name of user to plot, if not specified will just plot rounds'

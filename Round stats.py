@@ -21,7 +21,7 @@ logger = logging.getLogger(Path(__file__).stem)
 
 
 async def main() -> None:
-	argparser = ArgumentParser(__doc__)
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path',
 		type=Path,

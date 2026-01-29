@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Randomly generate a location or a certain amount of locations, optionally (and usually) within a polygon, and optionally print some stats."""
 
 import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
@@ -114,7 +115,7 @@ async def _random_points_in_poly(
 
 
 async def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
 		'path',
 		type=Path,

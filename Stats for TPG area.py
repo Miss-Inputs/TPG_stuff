@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Print various stats on an area used for a TPG spinoff."""
+
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -142,7 +144,7 @@ def print_cat_stats(
 
 
 def main() -> None:
-	argparser = ArgumentParser()
+	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument('path', type=Path, help='Path to geojson/gpkg/etc file')
 	argparser.add_argument(
 		'--category',
