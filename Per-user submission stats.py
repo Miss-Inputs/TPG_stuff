@@ -59,24 +59,28 @@ def get_concave_hull_info(point_set: PointSet):
 	return HullInfo(hull, area, perimeter)
 
 
-def get_stats(point_sets: Collection[PointSet], *, find_furthest: bool) -> pandas.DataFrame:
+def get_stats(
+	point_sets: Collection[PointSet], *, get_concave_hulls: bool, find_furthest: bool
+) -> pandas.DataFrame:
 	data = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
 		for point_set in t:
 			t.set_postfix(name=point_set.name)
 			# TODO: These should all be parameters whether to calculate each particular stat or not
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
-			concave_hull = get_concave_hull_info(point_set)
+
 			anticentroid = get_geometry_antipode(point_set.centroid)
 			row = {
 				'count': point_set.count,
 				'average_point': circular_mean_points(point_set.point_array),
 				'centroid': point_set.centroid,
 				'anticentroid': anticentroid,
-				'concave_hull': concave_hull.hull,
-				'concave_hull_area': concave_hull.area,
-				'concave_hull_perimeter': concave_hull.perimeter,
 			}
+			if get_concave_hulls:
+				concave_hull = get_concave_hull_info(point_set)
+				row['concave_hull'] = concave_hull.hull
+				row['concave_hull_area'] = concave_hull.area
+				row['concave_hull_perimeter'] = concave_hull.perimeter
 			if find_furthest:
 				furthest_point, furthest_distance = find_furthest_point(
 					point_set.point_array, anticentroid, max_iter=1000, use_tqdm=False
@@ -116,6 +120,13 @@ async def main() -> None:
 		help='Find the furthest possible point on the planet for each player. Defaults to false.',
 	)
 	argparser.add_argument(
+		'--find-concave-hulls',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Find the concave hulls and their area for each player. Defaults to true.',
+	)
+
+	argparser.add_argument(
 		'--concave-hull-output-path', type=Path, help='Path to save concave hulls'
 	)
 
@@ -137,7 +148,11 @@ async def main() -> None:
 		if threshold is None or gdf.index.size >= threshold
 	]
 
-	stats = get_stats(all_point_sets, find_furthest=args.find_furthest_points)
+	stats = get_stats(
+		all_point_sets,
+		get_concave_hulls=args.find_concave_hulls,
+		find_furthest=args.find_furthest_points,
+	)
 
 	print(
 		format_dataframe(
@@ -170,7 +185,7 @@ async def main() -> None:
 	)
 
 	concave_hull_path: Path | None = args.concave_hull_output_path
-	if concave_hull_path:
+	if concave_hull_path and args.find_concave_hulls:
 		concave_hulls = geopandas.GeoDataFrame(
 			stats[['name', 'concave_hull', 'concave_hull_area', 'concave_hull_perimeter']],
 			geometry='concave_hull',
