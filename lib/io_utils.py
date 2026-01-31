@@ -15,7 +15,7 @@ from travelpygame import (
 	validate_points,
 )
 from travelpygame.tpg_data import get_player_username
-from travelpygame.util import format_point, try_set_index_name_col
+from travelpygame.util import format_point, maybe_set_index_name_col, try_auto_set_index
 from travelpygame.util.io_utils import dataframe_exts, known_geo_exts, maybe_load_geodataframe
 
 from .settings import Settings
@@ -79,8 +79,8 @@ async def load_path_or_player(
 		logger.warning('%s had non-geographic CRS %s, converting to WGS84', name, gdf.crs)
 		gdf = gdf.to_crs('wgs84')
 
-	gdf = gdf.set_index(name_col) if name_col else try_set_index_name_col(gdf)
-	if isinstance(gdf.index, pandas.RangeIndex):
+	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, path_or_name)
+	if not new_name_col:
 		logger.info('%s had default index, formatting points', path_or_name)
 		gdf.index = pandas.Index(gdf.geometry.map(format_point))
 	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
@@ -131,13 +131,13 @@ def load_point_sets_from_folder(
 			# TODO: Is there a better way to know whether a file is one we want before we try loading it? Catching any sort of unknown file error relies on having a specific GeoPandas engine, pyogrio uses pyogrio.errors.DataSourceError and fiona uses fiona.errors.DriverError
 			if ext in dataframe_exts or ext in geo_exts:
 				gdf = load_points(child, use_tqdm=False)
-				gdf = try_set_index_name_col(gdf)
+				gdf = try_auto_set_index(gdf)
 				frames[child] = gdf
 			elif force_all:
 				gdf = maybe_load_geodataframe(child, use_tqdm=False)
 				if gdf is None:
 					logger.debug('Skipping unsupported file %s', child)
 				else:
-					gdf = try_set_index_name_col(gdf)
+					gdf = try_auto_set_index(gdf)
 					frames[child] = gdf
 	return [PointSet(gdf, path.stem) for path, gdf in frames.items()]

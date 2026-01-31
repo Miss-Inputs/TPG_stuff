@@ -9,7 +9,7 @@ from pathlib import Path
 
 import geopandas
 import pandas
-from pandas import Index, RangeIndex
+from pandas import Index
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -34,8 +34,8 @@ from travelpygame.util import (
 	format_ordinal,
 	format_point,
 	get_closest_index,
+	maybe_set_index_name_col,
 	output_geodataframe,
-	try_set_index_name_col,
 )
 
 from lib.io_utils import load_point_set_from_arg
@@ -95,14 +95,13 @@ async def eval_with_targets(
 ):
 	"""The function name kinda sucks but if it starts with test_ then Ruff thinks it's a test function and complains about things accordingly"""
 	targets = await asyncio.to_thread(load_points_or_rounds, target_paths)
-	targets = try_set_index_name_col(targets)
-	is_default_index = isinstance(targets.index, RangeIndex)
+	targets, new_index = maybe_set_index_name_col(targets)
 	dupe_geometry = targets.duplicated('geometry', keep=False)
 	if dupe_geometry.any():
 		print('Targets had duplicate geometries, only keeping first of each')
 		print(targets[dupe_geometry])
 		targets = targets.drop_duplicates('geometry')
-	if is_default_index:
+	if new_index is None:
 		# Try and get something more descriptive than just the default increasing index
 		# We do the isinstance check before drop_duplicates as that may change it
 		print('Setting default index for targets')
@@ -343,8 +342,8 @@ async def main() -> None:
 
 	points = await load_point_set_from_arg(args.existing_points)
 	new_points = await load_points_async(args.new_points)
-	new_points = try_set_index_name_col(new_points)
-	if isinstance(new_points.index, RangeIndex):
+	new_points, new_index = maybe_set_index_name_col(new_points)
+	if new_index is None:
 		new_points.index = Index(
 			[
 				format_point(geo) if isinstance(geo, Point) else str(geo)

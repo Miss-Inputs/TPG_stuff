@@ -35,7 +35,7 @@ from travelpygame.util import (
 	format_xy,
 	output_geodataframe,
 	read_geodataframe,
-	try_set_index_name_col,
+	try_auto_set_index,
 )
 
 from lib.io_utils import load_point_sets_from_folder
@@ -147,7 +147,7 @@ def output_results(
 def load_with_name(path: Path | str):
 	"""Loads points from `path` with names for each point. Might not be needed anymore."""
 	points = load_points(path)
-	points = try_set_index_name_col(points)
+	points = try_auto_set_index(points)
 	if isinstance(points.index, RangeIndex):
 		# Try and get something more descriptive than just the default increasing index
 		points.index = Index(
