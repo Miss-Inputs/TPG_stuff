@@ -35,6 +35,7 @@ Things to help figure out where to actually go in real life so you can have a be
 
 - Closest placings: With your username (and optionally a TPG data file), prints the person one place ahead of you for each round, how much ahead of you they were and in which direction, and optionally what point is that distance in that direction.
 - Evaluate new points: Given a point set, and also another point set for locations you haven't been to yet but are considering, this figures out which points in the new point set would be the most useful in various ways, optionally using a set of targets (which can be yet another point set, or a TPG data file to use the rounds from it) in which case it will find which new points get you closer to a target than your old points.
+- Region checklist: Given a point set, and also a file containing regions, displays which regions you don't have in your point set (so presumably haven't visited yet).
 
 ### For TPG spinoff runners
 
