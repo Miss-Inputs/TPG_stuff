@@ -22,6 +22,7 @@ from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_g
 from lib.io_utils import load_point_set_from_arg
 
 if TYPE_CHECKING:
+	from pandas import Series
 	from shapely.geometry.base import BaseGeometry
 
 BboxType = tuple[float, float, float, float] | list[float] | Literal['max', 'min'] | None
@@ -94,6 +95,23 @@ def get_winner(
 	else:
 		result = 'right'
 	return result, left_best_pic, right_best_pic
+
+
+def print_win_stats(winner_col: 'Series', left_name: str, right_name: str):
+	left_wins = (winner_col == left_name).sum()
+	right_wins = (winner_col == right_name).sum()
+	ties = winner_col.isna().sum()
+	total = winner_col.size
+
+	print(f'{left_name} wins: {left_wins} of {total} ({left_wins / total:%})')
+	print(f'{right_name} wins: {right_wins} of {total} ({right_wins / total:%})')
+	print(f'Ties: {ties} ({ties / total:%})')
+	print(
+		f'{left_name} wins or ties: {left_wins + ties} of {total} ({(left_wins + ties) / total:%})'
+	)
+	print(
+		f'{right_name} wins or ties: {right_wins + ties} of {total} ({(right_wins + ties) / total:%})'
+	)
 
 
 async def main() -> None:
@@ -237,6 +255,8 @@ async def main() -> None:
 		},
 		crs='wgs84',
 	)
+	print_win_stats(gdf['winner'], left_player.name, right_player.name)
+
 	details = gdf.drop(columns=['colour']).set_geometry(gdf.representative_point())
 	details = format_dataframe(details, point_cols='geometry')
 	print(details)
