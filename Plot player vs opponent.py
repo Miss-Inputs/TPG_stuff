@@ -78,10 +78,10 @@ def get_winner(
 		if left_in_box:
 			if right_in_box:
 				return 'tie', left_in_box, right_in_box
-			return 'left', left_in_box, get_best_pic(right_player, point)
+			return 'left', left_in_box, get_best_pic(right_player, point)[0]
 		if right_in_box:
 			# and not left_in_box
-			return 'right', right_in_box, get_best_pic(left_player, point)
+			return 'right', get_best_pic(left_player, point)[0], right_in_box
 	else:
 		point = geom
 	# TODO: Handle boxes where neither player has a point inside but they could win depending on what point of the box the target was (would need to think about that)
