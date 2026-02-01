@@ -351,12 +351,15 @@ async def main() -> None:
 		)
 
 	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
-	if args.threshold:
-		num_under = (distances['distance'] < args.threshold).sum()
+	threshold: float | None = args.threshold
+	if threshold:
+		under_threshold = distances['distance'] < threshold
+		num_under = under_threshold.sum()
 		if num_under:
 			print(
 				f'Ignoring {num_under} new points as they are within {format_distance(args.threshold)} from existing points'
 			)
+		new_points = new_points.drop(index=distances.loc[under_threshold, 'new_point'].to_list())
 		distances = distances[distances['distance'] >= args.threshold]
 	distances['distance'] = distances['distance'].map(format_distance)
 	distances['coords'] = distances['geometry'].map(format_point)
