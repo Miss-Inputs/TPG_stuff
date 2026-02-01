@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import re
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection, Mapping
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import shapely
 from aiohttp import ClientSession
-from pandas import Index, RangeIndex
+from pandas import DataFrame, Index, RangeIndex
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import (
 	PointSet,
@@ -31,8 +32,10 @@ from travelpygame.simulation import (
 )
 from travelpygame.tpg_data import PlayerUsername, get_player_display_names, rounds_to_json
 from travelpygame.util import (
+	format_dataframe,
 	format_point,
 	format_xy,
+	output_dataframe,
 	output_geodataframe,
 	read_geodataframe,
 	try_auto_set_index,
@@ -74,6 +77,7 @@ def get_simulation(
 	targets_path: Path | None,
 	num_random_rounds: int | None,
 	region_path: Path | None,
+	single_point: shapely.Point | None,
 	*,
 	use_haversine: bool,
 ) -> Simulation:
@@ -103,6 +107,8 @@ def get_simulation(
 		else:
 			points = [random_point_in_bbox(-180, -90, 180, 90) for _ in range(num_random_rounds)]
 		rounds = {format_point(point): point for point in points}
+	elif single_point:
+		rounds = {format_point(single_point): single_point}
 	else:
 		raise RuntimeError('You have no rounds to be simulated')
 	return Simulation(
@@ -212,6 +218,25 @@ async def load_point_sets(
 	return point_sets
 
 
+def parse_coords(s: str) -> shapely.Point | None:
+	lat_s, lng_s = re.split(r'[,\s/;]\s*', s, maxsplit=1)
+	lat = float(lat_s)
+	lng = float(lng_s)
+	return shapely.Point(lng, lat)
+
+
+def simulate_single_round(sim: Simulation, output_path: Path | None):
+	round_name, target = next(iter(sim.rounds.items()))
+	result = sim.simulate_round(round_name, 1, target)
+	rows = [sub.model_dump(exclude_none=True) for sub in result.submissions]
+	df = DataFrame(rows)
+	df.insert(0, 'rank', df.pop('rank'))
+
+	print(format_dataframe(df, distance_cols=('distance')))
+	if output_path:
+		output_dataframe(df, output_path)
+
+
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	strategy_choices = {s.name.lower(): s for s in SimulatedStrategy}
@@ -244,6 +269,12 @@ def main() -> None:
 		'--targets',
 		type=Path,
 		help='If this path is specified, load points from this file to be used as each round',
+	)
+	exclusive_target_args.add_argument(
+		'--point',
+		'--single',
+		type=parse_coords,
+		help='If this is specified, display results for a single round (target specified lat/lng decimal degrees, if you use DMS I hate you). Ignores various output options',
 	)
 	exclusive_target_args.add_argument(
 		'--random-rounds', type=int, help='If this is specified, generate N random rounds'
@@ -279,15 +310,16 @@ def main() -> None:
 	output_args.add_argument(
 		'--player-summary-path',
 		'--player-summary-output-path',
+		'--scores-output-path',
 		type=Path,
-		help='Output total scores/etc of simulated players here',
+		help='Output total scores/etc of simulated players here, or if using --point, the scores of each player for the single round',
 	)
 	output_args.add_argument(
 		'--round-summary-path',
 		'--rounds-output-path',
 		'--round-summary-output-path',
 		type=Path,
-		help='Output winners/etc of each round here',
+		help='Output winners/etc of each round here.',
 	)
 	output_args.add_argument(
 		'--podium-rounds-path',
@@ -381,6 +413,7 @@ def main() -> None:
 		targets_path,
 		num_random_points,
 		region_path,
+		args.point,
 		use_haversine=args.use_haversine,
 	)
 
@@ -390,6 +423,10 @@ def main() -> None:
 			f'Warning: {name} was not found in TPG data or otherwise did not have any pics, so does not exist in this context. Setting to None'
 		)
 		name = None
+
+	if len(simulation.rounds) == 1:
+		simulate_single_round(simulation, args.player_summary_path)
+		return
 
 	new_rounds = simulation.simulate_rounds()
 	output_results(
