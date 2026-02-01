@@ -8,7 +8,7 @@ import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import contextily
 import geopandas
@@ -23,28 +23,32 @@ from lib.io_utils import load_point_set_from_arg
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
 
+BboxType = tuple[float, float, float, float] | list[float] | Literal['max', 'min'] | None
+
 
 def get_grid(
 	left_player: PointSet,
 	right_player: PointSet,
 	resolution: float,
+	limit_bbox: BboxType,
 	*,
 	use_boxes: bool,
-	limit_grid_to_bbox: bool,
 ):
-	if limit_grid_to_bbox:
-		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
-		right_minx, right_miny, right_maxx, right_maxy = right_player.gdf.total_bounds
-		min_x = min(left_minx, right_minx)
-		min_y = min(left_miny, right_miny)
-		max_x = max(left_maxx, right_maxx)
-		max_y = max(left_maxy, right_maxy)
-	else:
-		# Having points at the exact edges gets screwy
+	if isinstance(limit_bbox, (tuple, list)):
+		min_x, min_y, max_x, max_y = limit_bbox
+	elif limit_bbox is None:
+		# Having points at the exact edges might be screwy
 		min_x = -179
 		min_y = -89
 		max_x = 179
 		max_y = 89
+	else:
+		left_minx, left_miny, left_maxx, left_maxy = left_player.gdf.total_bounds
+		right_minx, right_miny, right_maxx, right_maxy = right_player.gdf.total_bounds
+		min_x = min(left_minx, right_minx) if limit_bbox == 'max' else max(left_minx, right_minx)
+		min_y = min(left_miny, right_miny) if limit_bbox == 'max' else max(left_miny, right_miny)
+		max_x = max(left_maxx, right_maxx) if limit_bbox == 'max' else min(left_maxx, right_maxx)
+		max_y = max(left_maxy, right_maxy) if limit_bbox == 'max' else min(left_maxy, right_maxy)
 	# Assume crs is wgs84 for now
 	return (
 		get_fixed_box_grid(min_x, min_y, max_x, max_y, resolution)
@@ -146,10 +150,8 @@ async def main() -> None:
 		help='Resolution of points to plot distances to, higher resolutions (smaller values) will be more computationally intensive. Defaults to 1 decimal degree.',
 	)
 	grid_args_group.add_argument(
-		'--limit-grid-to-bbox',
-		action=BooleanOptionalAction,
-		default=False,
-		help="Limit the grid to the bounding box of the player's points, defaults to false",
+		'--bbox',
+		help='If specified, limit the grid to a bounding box. Can be "max" for the combined bounds of both player\'s points (area that either player has), "min" for the shared bounds (area that both players have), or custom boundaries as a comma-separated list of floats (minx/miny/maxx/maxy). "min" may result in unexpected behaviour if both point sets are nowhere near each other',
 	)
 	# TODO: Option to limit grid to certain range
 	argparser.add_argument(
@@ -180,13 +182,16 @@ async def main() -> None:
 	right_player = await load_point_set_from_arg(args.right_player, name_col=args.right_name_col)
 
 	use_boxes: bool = args.use_boxes
-	grid = get_grid(
-		left_player,
-		right_player,
-		args.resolution,
-		use_boxes=use_boxes,
-		limit_grid_to_bbox=args.limit_grid_to_bbox,
-	)
+	bbox_arg: str | None = args.bbox
+	bbox: BboxType = None
+	if bbox_arg:
+		bbox = (
+			bbox_arg
+			if bbox_arg in {'max', 'min'}
+			else [float(part.strip()) for part in bbox_arg.split(',')]
+		)  # pyright: ignore[reportAssignmentType] #why.
+
+	grid = get_grid(left_player, right_player, args.resolution, bbox, use_boxes=use_boxes)
 
 	left_best_pics = {}
 	right_best_pics = {}
