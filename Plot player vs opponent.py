@@ -17,7 +17,12 @@ from shapely import Point, prepare
 from tqdm.auto import tqdm
 from travelpygame import PointSet, get_best_pic
 from travelpygame.util import format_dataframe, output_dataframe
-from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
+from travelpygame.util.point_construction import (
+	get_fixed_box_grid,
+	get_fixed_grid,
+	get_spaced_box_grid,
+	get_spaced_grid,
+)
 
 from lib.io_utils import load_point_set_from_arg
 
@@ -33,6 +38,7 @@ def get_grid(
 	right_player: PointSet,
 	resolution: float,
 	limit_bbox: BboxType,
+	spaced_amount: int | None = None,
 	*,
 	use_boxes: bool,
 ):
@@ -52,6 +58,12 @@ def get_grid(
 		max_x = max(left_maxx, right_maxx) if limit_bbox == 'max' else min(left_maxx, right_maxx)
 		max_y = max(left_maxy, right_maxy) if limit_bbox == 'max' else min(left_maxy, right_maxy)
 	# Assume crs is wgs84 for now
+	if spaced_amount:
+		return (
+			get_spaced_box_grid(min_x, min_y, max_x, max_y, spaced_amount)
+			if use_boxes
+			else get_spaced_grid(min_x, min_y, max_x, max_y, spaced_amount)
+		)
 	return (
 		get_fixed_box_grid(min_x, min_y, max_x, max_y, resolution)
 		if use_boxes
@@ -162,19 +174,25 @@ async def main() -> None:
 		'--use-boxes',
 		action=BooleanOptionalAction,
 		default=True,
-		help='Use boxes instead of points (and compute distances to an arbitrary point on the box which will usually end up being the middle), defaults to true. If players have points inside a box, distances will not be computed, and whichever player has a point in the box will win that box (or if both they will tie).',
+		help='Use boxes instead of points (and compute distances to an arbitrary point on the box which will usually end up being the middle), defaults to true. If players have points inside a box, distances will not be computed, and whichever player has a point in the box will win that box (or if both they will tie). There is not much reason to set this to false, as there is not really any way to make the output look good that way',
 	)
-	grid_args_group.add_argument(
+	exclusive_grid_args = grid_args_group.add_mutually_exclusive_group()
+	exclusive_grid_args.add_argument(
+		'--amount',
+		type=int,
+		help='Use a fixed amount of boxes in each direction, instead of a box for each N degree (like with --resolution).',
+	)
+	exclusive_grid_args.add_argument(
 		'--resolution',
 		type=float,
 		default=1.0,
-		help='Resolution of points to plot distances to, higher resolutions (smaller values) will be more computationally intensive. Defaults to 1 decimal degree.',
+		help='Use a grid of boxes with one box every N degrees (if neither this or --amount is specified, defaults to 1 decimal degree). Higher resolutions (smaller values) will be more computationally intensive but result in more detail about areas won/lost.',
 	)
 	grid_args_group.add_argument(
 		'--bbox',
 		help='If specified, limit the grid to a bounding box. Can be "max" for the combined bounds of both player\'s points (area that either player has), "min" for the shared bounds (area that both players have), or custom boundaries as a comma-separated list of floats (minx/miny/maxx/maxy). "min" may result in unexpected behaviour if both point sets are nowhere near each other',
 	)
-	# TODO: Option to limit grid to certain range
+
 	argparser.add_argument(
 		'--output-path',
 		'--save',
@@ -215,7 +233,9 @@ async def main() -> None:
 			else [float(part.strip()) for part in bbox_arg.split(',')]
 		)  # pyright: ignore[reportAssignmentType] #why.
 
-	grid = get_grid(left_player, right_player, args.resolution, bbox, use_boxes=use_boxes)
+	grid = get_grid(
+		left_player, right_player, args.resolution, bbox, args.amount, use_boxes=use_boxes
+	)
 
 	left_best_pics = {}
 	right_best_pics = {}
