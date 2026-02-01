@@ -87,6 +87,7 @@ async def eval_with_targets(
 	points: PointSet,
 	new_points: geopandas.GeoDataFrame,
 	target_paths: list[Path],
+	target_output_path: Path | None,
 	output_path: Path | None,
 	*,
 	use_haversine: bool = True,
@@ -119,8 +120,8 @@ async def eval_with_targets(
 			.reindex(new_points.index, fill_value=0)
 			.sort_values(ascending=False)
 		)
-		if output_path:
-			await asyncio.to_thread(output_dataframe, better, output_path)
+		if target_output_path:
+			await asyncio.to_thread(output_dataframe, better, target_output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
 		points.points, targets, use_haversine=use_haversine
@@ -145,7 +146,8 @@ async def eval_with_targets(
 		print(f'Never better: {not_used}')
 	diffs = diffs.sort_values('mean', ascending=False)
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
-	# Should this be (optionally) output somewhere?
+	if output_path:
+		await asyncio.to_thread(output_dataframe, diffs, output_path)
 
 
 def _get_point_name(current_points: PointSet, current_diff: SubmissionDifference):
@@ -331,12 +333,18 @@ async def main() -> None:
 		default=True,
 	)
 	argparser.add_argument(
-		'--output-path', type=Path, help='Optional path to save improved distances to targets'
+		'--output-path',
+		type=Path,
+		help='Optional path to save summary of improvements for each new point (one row per new point)',
+	)
+	argparser.add_argument(
+		'--target-output-path',
+		type=Path,
+		help='Optional path to save improved distances to targets (one row per target)',
 	)
 	# TODO: Option for new_points to just be one point
 	# TODO: lat/lng/blah column name options
 	# TODO: Allow eval_with_targets while just using the rounds from --rounds-path instead of specifying targets
-	# TODO: Allow specifying either username or player display name for --player, in some intuitive/non-stupid way
 	args = argparser.parse_args()
 
 	points = await load_point_set_from_arg(args.existing_points)
@@ -377,6 +385,7 @@ async def main() -> None:
 			points,
 			new_points,
 			args.targets,
+			args.target_output_path,
 			args.output_path,
 			find_if_any_pics_better=args.find_if_any_pics_better,
 			use_haversine=args.use_haversine,
