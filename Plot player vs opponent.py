@@ -8,7 +8,7 @@ import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import contextily
 import geopandas
@@ -16,6 +16,7 @@ from matplotlib import pyplot
 from shapely import Point, prepare
 from tqdm.auto import tqdm
 from travelpygame import PointSet, get_best_pic
+from travelpygame.util import format_dataframe, output_dataframe
 from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
 
 from lib.io_utils import load_point_set_from_arg
@@ -65,7 +66,9 @@ def get_first_index_inside(geom: 'BaseGeometry', point_set: PointSet):
 	return within.index[0]
 
 
-def get_winner(geom: 'BaseGeometry', left_player: PointSet, right_player: PointSet):
+def get_winner(
+	geom: 'BaseGeometry', left_player: PointSet, right_player: PointSet
+) -> tuple[Literal['left', 'right', 'tie'], Any, Any]:
 	if not isinstance(geom, Point):
 		prepare(geom)
 		point = geom.representative_point()
@@ -162,6 +165,9 @@ async def main() -> None:
 		dest='output_path',
 		help='Location to save map as an image, instead of showing',
 	)
+	argparser.add_argument(
+		'--details-output-path', type=Path, help='Save details of who wins each round to this file'
+	)
 	plot_args_group.add_argument(
 		'--marker-size',
 		type=float,
@@ -196,6 +202,7 @@ async def main() -> None:
 	left_best_pics = {}
 	right_best_pics = {}
 	colours = {}
+	winners = {}
 
 	with tqdm(
 		grid.items(),
@@ -208,11 +215,15 @@ async def main() -> None:
 			result, left_best_pic, right_best_pic = get_winner(geom, left_player, right_player)
 			if result == 'left':
 				colour = args.left_colour
+				winner = left_player.name
 			elif result == 'right':
 				colour = args.right_colour
+				winner = right_player.name
 			else:
 				colour = args.tie_colour
+				winner = None
 			colours[index] = colour
+			winners[index] = winner
 			left_best_pics[index] = left_best_pic
 			right_best_pics[index] = right_best_pic
 
@@ -220,12 +231,17 @@ async def main() -> None:
 		{
 			'geometry': grid,
 			'colour': colours,
+			'winner': winners,
 			'left_best': left_best_pics,
 			'right_best': right_best_pics,
 		},
 		crs='wgs84',
 	)
-	print(gdf)
+	details = gdf.drop(columns=['colour']).set_geometry(gdf.representative_point())
+	details = format_dataframe(details, point_cols='geometry')
+	print(details)
+	if args.details_output_path:
+		output_dataframe(details, args.details_output_path, index=False)
 
 	fig, ax = pyplot.subplots()
 	gdf.plot(
