@@ -162,11 +162,11 @@ def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None, threshol
 	for name, point_set in per_user.items():
 		if skipped and name in skipped:
 			continue
-		if threshold and point_set.size < threshold:
+		if threshold and point_set.index.size < threshold:
 			continue
 		if isinstance(point_set.index, pandas.RangeIndex):
-			point_set.index = pandas.Index(point_set.map(format_point))  # pyright: ignore[reportAttributeAccessIssue]
-		out.append(point_set)
+			point_set.index = pandas.Index(point_set.geometry.map(format_point))  # pyright: ignore[reportAttributeAccessIssue]
+		out.append(point_set.geometry)
 	return out
 
 
