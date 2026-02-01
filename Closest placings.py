@@ -12,7 +12,13 @@ from geopandas import GeoDataFrame
 from shapely import Point
 from travelpygame import Round, get_main_tpg_rounds_with_path, load_rounds, output_geodataframe
 from travelpygame.submission_comparison import find_next_highest_placing
-from travelpygame.util import format_dataframe, format_xy, geod_distance_and_bearing, wgs84_geod
+from travelpygame.util import (
+	format_dataframe,
+	format_xy,
+	geod_distance_and_bearing,
+	output_dataframe,
+	wgs84_geod,
+)
 
 from lib.settings import Settings
 
@@ -117,7 +123,7 @@ def main() -> None:
 				index=True,
 			)
 		else:
-			df.to_csv(output_path)
+			output_dataframe(df, output_path)
 
 	print(
 		format_dataframe(

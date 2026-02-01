@@ -14,6 +14,7 @@ from matplotlib import pyplot
 from travelpygame.subs_per_player import load_or_fetch_per_player_submissions
 from travelpygame.util import (
 	first_unique_column_label,
+	output_dataframe,
 	output_geodataframe,
 	read_geodataframe,
 	wgs84_geod,
@@ -184,7 +185,7 @@ def main() -> None:
 	df = df.sort_values('count', ascending=False)
 	print(df)
 	if args.output_path:
-		df.to_csv(args.output_path)
+		output_dataframe(df, args.output_path)
 
 	plot_regions(gdf, args.map_output_path, use_contextily=args.use_contextily)
 

@@ -31,6 +31,7 @@ from travelpygame.util import (
 	format_point,
 	load_points,
 	maybe_set_index_name_col,
+	output_dataframe,
 )
 
 from lib.settings import Settings
@@ -225,7 +226,7 @@ def compare_one_to_many(
 		)
 	)
 	if output_path:
-		df.to_csv(output_path)
+		output_dataframe(df, output_path)
 
 	if method is None:
 		closest_by_method = df[diff_cols].idxmin(axis='index')
@@ -296,7 +297,7 @@ def compare_all(
 		)  # That's symmetrical, right? Yeah nah should be
 
 	if raw_output_path:
-		pandas.DataFrame(scores).to_csv(raw_output_path)
+		output_dataframe(pandas.DataFrame(scores), raw_output_path)
 
 	rows = {}
 	for name, other_scores in scores.items():
@@ -322,7 +323,7 @@ def compare_all(
 		to_graph(df, None, 'most similar', 'most similar amount', graph_output_path)
 	print(df)
 	if output_path:
-		df.to_csv(output_path)
+		output_dataframe(df, output_path)
 
 
 def main() -> None:

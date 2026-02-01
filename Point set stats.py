@@ -26,6 +26,7 @@ from travelpygame.util import (
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
 	get_polygons,
+	output_dataframe,
 	output_geodataframe,
 	read_geodataframe_async,
 )
@@ -153,7 +154,7 @@ def print_unique_points(point_set: PointSet, uniqueness_path: Path | None):
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
 	if uniqueness_path:
-		uniqueness.to_csv(uniqueness_path)
+		output_dataframe(uniqueness, uniqueness_path)
 	print(format_dataframe(uniqueness, 'uniqueness'))
 
 	total_uniqueness = get_total_uniqueness(point_set.points)

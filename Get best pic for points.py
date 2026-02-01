@@ -18,6 +18,7 @@ from travelpygame.util import (
 	format_point,
 	get_distances,
 	load_points,
+	output_dataframe,
 )
 from travelpygame.util.pandas_utils import maybe_name_cols
 
@@ -126,7 +127,7 @@ def main() -> None:
 	print('Average distance:', format_distance(df['distance'].mean()))
 
 	if args.out_path:
-		df.to_csv(args.out_path)
+		output_dataframe(df, args.out_path)
 	if args.threshold:
 		threshold: float = args.threshold * 1_000
 		counts = df[df['distance'] < threshold]['best_pic'].value_counts()

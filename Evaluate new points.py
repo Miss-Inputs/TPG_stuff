@@ -35,6 +35,7 @@ from travelpygame.util import (
 	format_point,
 	get_closest_index,
 	maybe_set_index_name_col,
+	output_dataframe,
 	output_geodataframe,
 )
 
@@ -121,7 +122,7 @@ async def eval_with_targets(
 			.sort_values(ascending=False)
 		)
 		if output_path:
-			await asyncio.to_thread(better.to_csv, output_path)
+			await asyncio.to_thread(output_dataframe, better, output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
 		points.point_array, targets, use_haversine=use_haversine
@@ -252,7 +253,7 @@ async def eval_with_rounds(
 	df = pandas.DataFrame(rows)
 	df = df.dropna(how='all', axis='columns')
 	if output_path:
-		await asyncio.to_thread(df.to_csv, output_path, index=False)
+		await asyncio.to_thread(output_dataframe, df, output_path, index=False)
 	print(
 		format_dataframe(
 			df.drop(columns='rival_pic', errors='ignore'), ('new_dist', 'rival_dist', 'amount')

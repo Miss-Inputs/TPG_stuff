@@ -134,13 +134,13 @@ def output_results(
 	round_summary = get_round_summary(new_rounds, name)
 	print(round_summary)
 	if round_summary_path:
-		round_summary.to_csv(round_summary_path)
+		output_dataframe(round_summary, round_summary_path)
 
 	# TODO: More detailed stats here, like maybe a whole entire leaderboard
 	player_summary = get_player_summary(new_rounds)
 	print(player_summary)
 	if player_summary_path:
-		player_summary.to_csv(player_summary_path)
+		output_dataframe(player_summary, player_summary_path)
 
 	if name and (podium_rounds_path or losing_rounds_path):
 		podiumming, losing = get_player_podium_or_losing_points(new_rounds, name)

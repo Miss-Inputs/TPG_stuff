@@ -13,7 +13,7 @@ import pyproj
 from aiohttp import ClientSession
 from shapely import MultiPoint, Point
 from travelpygame import load_rounds_async
-from travelpygame.util import get_centroid, get_projected_crs, get_total_bounds
+from travelpygame.util import get_centroid, get_projected_crs, get_total_bounds, output_dataframe
 
 from lib.format_utils import describe_point
 
@@ -99,7 +99,7 @@ async def main() -> None:
 	df = pandas.DataFrame(rows).set_index('Round')
 	print(df)
 	out_path = args.path.with_name(f'{args.path.stem} - Stats.csv')
-	await asyncio.to_thread(df.to_csv, out_path)
+	await asyncio.to_thread(output_dataframe, df, out_path)
 
 
 if __name__ == '__main__':
