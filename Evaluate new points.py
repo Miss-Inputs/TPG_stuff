@@ -77,9 +77,7 @@ def get_where_pics_better(
 	*,
 	use_haversine: bool = True,
 ):
-	results = find_if_new_pics_better(
-		points.point_array, new_points, targets, use_haversine=use_haversine
-	)
+	results = find_if_new_pics_better(points, new_points, targets, use_haversine=use_haversine)
 	better = results[results['is_new_better']].copy().drop(columns='is_new_better')
 	better['diff'] = better['current_distance'] - better['new_distance']
 	return better.sort_values('diff', ascending=False)
@@ -125,7 +123,7 @@ async def eval_with_targets(
 			await asyncio.to_thread(output_dataframe, better, output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		points.point_array, targets, use_haversine=use_haversine
+		points.points, targets, use_haversine=use_haversine
 	)
 	print(f'Worst case target: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}')
 	combined = pandas.concat([points.gdf, new_points])
@@ -140,7 +138,7 @@ async def eval_with_targets(
 	)
 
 	diffs = find_new_pics_better_individually(
-		points.point_array, new_points, targets, use_haversine=use_haversine
+		points, new_points, targets, use_haversine=use_haversine
 	)
 	not_used = ', '.join(new_points.index.difference(diffs.index))
 	if not_used:
