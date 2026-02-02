@@ -11,8 +11,7 @@ from aiohttp import ClientSession
 from shapely import Point
 from tqdm.auto import tqdm
 from travelpygame import load_points_async, output_geodataframe
-
-from lib.reverse_geocode import reverse_geocode_address
+from travelpygame.reverse_geocode import reverse_geocode_address
 
 if TYPE_CHECKING:
 	import geopandas

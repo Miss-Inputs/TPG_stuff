@@ -13,6 +13,7 @@ import pandas
 from aiohttp import ClientSession
 from tqdm.auto import tqdm
 from travelpygame import get_uniqueness
+from travelpygame.reverse_geocode import reverse_geocode_address, reverse_geocode_components
 from travelpygame.util import (
 	circular_mean_points,
 	format_ordinal,
@@ -23,12 +24,7 @@ from travelpygame.util import (
 
 from lib.format_utils import country_name_to_code, describe_row
 from lib.io_utils import latest_file_matching_format_pattern
-from lib.reverse_geocode import (
-	reverse_geocode_address,
-	reverse_geocode_components,
-	reverse_geocode_gadm_all,
-	reverse_geocode_gadm_country,
-)
+from lib.reverse_geocode import reverse_geocode_gadm_all, reverse_geocode_gadm_country
 from lib.settings import Settings
 
 logger = logging.getLogger(__name__)

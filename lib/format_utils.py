@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING
 
 import pandas
 import pycountry
+from travelpygame.reverse_geocode import reverse_geocode_address
 from travelpygame.util.other import format_xy
-
-from lib.reverse_geocode import reverse_geocode_address
 
 if TYPE_CHECKING:
 	from aiohttp import ClientSession
@@ -23,7 +22,7 @@ async def describe_coord(
 	address = await reverse_geocode_address(lat, lng, session)
 	if not address:
 		if lat <= -60:
-			# Nominatim has trouble with Antarctica for some reason
+			# Nominatim has trouble with Antarctica for some reason (there was a reason but I forgor)
 			return f'<Antarctica ({format_xy(lng, lat)})>'
 		return f'<Unknown ({format_xy(lng, lat)})>'
 	return f'{format_xy(lng, lat)} {address}' if include_coords else address

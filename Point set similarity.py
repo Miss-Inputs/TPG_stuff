@@ -28,6 +28,7 @@ from travelpygame.util import (
 	format_distance,
 	format_number,
 	output_dataframe,
+	to_graph,
 )
 
 from lib.io_utils import load_point_set_from_arg
@@ -145,26 +146,6 @@ def compare_one_to_many(
 				number_cols=('min_diff', 'max_diff'),
 			)
 		)
-
-
-def to_graph(
-	df: pandas.DataFrame,
-	source_col: str | None,
-	dest_col: str,
-	weight_col: str | None,
-	output_path: Path,
-):
-	# TODO: This belongs in travelpygame probably
-	with output_path.open('wt', encoding='utf8') as f:
-		f.write('digraph "" {\n')
-		for index, row in df.iterrows():
-			source = str(index if source_col is None else row[source_col]).replace('"', '\\"')
-			dest = str(row[dest_col]).replace('"', '\\"')
-			line = f'"{source}" -> "{dest}"'
-			if weight_col:
-				line += f' [weight={row[weight_col]}]'
-			f.write(f'{line};\n')
-		f.write('}')
 
 
 def compare_all(
