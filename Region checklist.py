@@ -126,7 +126,7 @@ async def main() -> None:
 	if regions.crs != dest_crs:
 		if dest_crs:
 			print(f'Reprojecting regions from {regions.crs} to point set CRS ({dest_crs})')
-			regions = regions.set_crs(dest_crs)
+			regions = regions.to_crs(dest_crs)
 		else:
 			print('Point set had no CRS somehow, assuming WGS84 and reprojecting regions to that')
 			regions = regions.set_crs('wgs84')
