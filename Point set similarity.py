@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Get distances between point set(s)."""
+"""Get distances (dissimilarity) between point set(s)."""
 
 import asyncio
 import itertools
@@ -7,7 +7,7 @@ import logging
 from argparse import ArgumentParser, Namespace
 from argparse import _ArgumentGroup as ArgumentGroup
 from collections import defaultdict
-from collections.abc import Hashable
+from collections.abc import Collection
 from operator import itemgetter
 from pathlib import Path
 from statistics import mean
@@ -16,7 +16,7 @@ import pandas
 import pyproj
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import load_or_fetch_per_player_submissions, validate_points
+from travelpygame import PointSet, load_or_fetch_per_player_submissions
 from travelpygame.point_set_stats import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
@@ -24,63 +24,18 @@ from travelpygame.point_set_stats import (
 	get_point_set_distance,
 )
 from travelpygame.util import (
-	first_unique_column_label,
 	format_dataframe,
 	format_distance,
 	format_number,
-	format_point,
-	load_points,
-	maybe_set_index_name_col,
 	output_dataframe,
 )
 
+from lib.io_utils import load_point_set_from_arg
 from lib.settings import Settings
 
 logger = logging.getLogger(Path(__file__).stem)
 
 wgs84 = pyproj.CRS('WGS84')
-
-
-def load_and_validate(
-	path: Path,
-	lat_col: Hashable | None = None,
-	lng_col: Hashable | None = None,
-	input_crs: str | None = None,
-	name_col: str | None = None,
-	*,
-	unheadered: bool = False,
-):
-	gdf = load_points(
-		path, lat_col, lng_col, input_crs or wgs84, has_header=False if unheadered else None
-	)
-	if not gdf.crs:
-		logger.warning('%s had no CRS, which should never happen', path.name)
-		gdf = gdf.set_crs(wgs84)
-	elif not gdf.crs.equals(wgs84):
-		logger.warning('%s had CRS %s, converting to WGS84', path.name, gdf.crs)
-		gdf = gdf.to_crs(wgs84)
-
-	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, path.name)
-	if new_name_col:
-		if not name_col:
-			logger.info('Autodetected name column for %s as %s', path.name, new_name_col)
-	else:
-		first_unique = first_unique_column_label(gdf.drop(columns=gdf.active_geometry_name))
-		gdf, new_name_col = maybe_set_index_name_col(gdf, first_unique, try_autodetect=False)
-		if new_name_col and not name_col:
-			logger.info(
-				'Autodetected name column for %s as first unique column (%s)',
-				path.name,
-				new_name_col,
-			)
-
-	if not new_name_col:
-		gdf.index = pandas.Index(gdf.geometry.map(format_point))
-	print(f'{path.name}: {gdf.index.size} items')
-	gs, _ = validate_points(gdf, name_for_log=path)
-	gs = gs.rename(path.stem)
-	print(f'{path.name} after validation: {gs.size} items')
-	return gs
 
 
 def _add_args(arg_group: ArgumentGroup, side: str):
@@ -114,107 +69,51 @@ def _add_args(arg_group: ArgumentGroup, side: str):
 	)
 
 
-def compare_two_paths(
-	left_path: Path, right_path: Path, args: Namespace, method: PointSetDistanceMethodType | None
-):
-	left = load_and_validate(
-		left_path,
-		args.lat_col_left,
-		args.lng_col_left,
-		args.crs_left,
-		args.name_col_left,
-		unheadered=args.unheadered_left,
-	)
-	right = load_and_validate(
-		right_path,
-		args.lat_col_right,
-		args.lng_col_right,
-		args.crs_right,
-		args.name_col_right,
-		unheadered=args.unheadered_right,
-	)
-
+def compare_two(left: PointSet, right: PointSet, method: PointSetDistanceMethodType | None):
 	if not method:
 		scores = {}
 		for i, meth in enumerate(PointSetDistanceMethod):
-			score, closest_dist, closest_a, closest_b = get_point_set_distance(
-				left, right, meth, use_tqdm=False
-			)
+			distance = get_point_set_distance(left, right, meth, use_tqdm=False)
 			if i == 0:
 				print(
-					f'Closest pair of points: {closest_a} and {closest_b}, {format_distance(closest_dist)}'
+					f'Closest pair of points: {distance.closest_a} and {distance.closest_b}, {format_distance(distance.closest_distance)}'
 				)
-			scores[meth.name] = score
+			scores[meth.name] = distance.distance
 		for meth, score in scores.items():
 			print(f'Dissimilarity from {meth}: {format_number(score)}')
 
 	else:
-		score, closest_dist, closest_a, closest_b = get_point_set_distance(left, right, method)
-		print(f'Dissimilarity: {format_number(score)}')
+		distance = get_point_set_distance(left, right, method)
+		print(f'Dissimilarity: {format_number(distance.distance)}')
 		print(
-			f'Closest pair of points: {closest_a} and {closest_b}, {format_distance(closest_dist)}'
+			f'Closest pair of points: {distance.closest_a} and {distance.closest_b}, {format_distance(distance.closest_distance)}'
 		)
-
-
-def get_subs_per_user(subs_path: Path | None, skipped: set[str] | None, threshold: int | None):
-	per_user = asyncio.run(load_or_fetch_per_player_submissions(subs_path))
-	out = []
-	for name, point_set in per_user.items():
-		if skipped and name in skipped:
-			continue
-		if threshold and point_set.index.size < threshold:
-			continue
-		if isinstance(point_set.index, pandas.RangeIndex):
-			point_set.index = pandas.Index(point_set.geometry.map(format_point))  # pyright: ignore[reportAttributeAccessIssue]
-		out.append(point_set.geometry)
-	return out
 
 
 def compare_one_to_many(
-	left_path: Path,
-	right_paths: list[Path],
-	args: Namespace,
+	left: PointSet,
+	point_sets: list[PointSet],
 	method: PointSetDistanceMethodType | None,
-	subs_path: Path | None,
 	output_path: Path | None,
 ):
-	left = load_and_validate(
-		left_path,
-		args.lat_col_left,
-		args.lng_col_left,
-		args.crs_left,
-		args.name_col_left,
-		unheadered=args.unheadered_left,
-	)
-	if right_paths:
-		point_sets = [load_and_validate(path) for path in right_paths]
-	else:
-		point_sets = get_subs_per_user(
-			subs_path, {args.player_name, *(args.exclude_player or ())}, args.threshold
-		)
-
 	rows = {}
 	with tqdm(point_sets, 'Comparing point sets', unit='point set') as t:
 		for point_set in t:
 			t.set_postfix(name=point_set.name)
 			row = {}
 			if method:
-				diff, dist, closest_left, closest_right = get_point_set_distance(
-					left, point_set, method, use_tqdm=False
-				)
-				row['closest_distance'] = dist
-				row['closest_left'] = closest_left
-				row['closest_right'] = closest_right
-				row['dissimilarity'] = diff
+				diff = get_point_set_distance(left, point_set, method, use_tqdm=False)
+				row['closest_distance'] = diff.closest_distance
+				row['closest_left'] = diff.closest_a
+				row['closest_right'] = diff.closest_b
+				row['dissimilarity'] = diff.distance
 			else:
 				for meth in PointSetDistanceMethod:
-					diff, dist, closest_left, closest_right = get_point_set_distance(
-						left, point_set, meth, use_tqdm=False
-					)
-					row['closest_distance'] = dist
-					row['closest_left'] = closest_left
-					row['closest_right'] = closest_right
-					row[meth.name] = diff
+					diff = get_point_set_distance(left, point_set, meth, use_tqdm=False)
+					row['closest_distance'] = diff.closest_distance
+					row['closest_left'] = diff.closest_a
+					row['closest_right'] = diff.closest_b
+					row[meth.name] = diff.distance
 			rows[point_set.name] = row
 	df = pandas.DataFrame.from_dict(rows, 'index')
 	diff_cols = df.columns[~df.columns.str.startswith('closest_')]
@@ -255,6 +154,7 @@ def to_graph(
 	weight_col: str | None,
 	output_path: Path,
 ):
+	# TODO: This belongs in travelpygame probably
 	with output_path.open('wt', encoding='utf8') as f:
 		f.write('digraph "" {\n')
 		for index, row in df.iterrows():
@@ -268,16 +168,12 @@ def to_graph(
 
 
 def compare_all(
-	args: Namespace,
+	point_sets: Collection[PointSet],
 	method: PointSetDistanceMethodType | None,
-	subs_path: Path | None,
 	raw_output_path: Path | None,
 	output_path: Path | None,
 	graph_output_path: Path | None,
 ):
-	point_sets = get_subs_per_user(
-		subs_path, {args.player_name, *(args.exclude_player or ())}, args.threshold
-	)
 	method = method or PointSetDistanceMethod.MeanMin
 
 	scores: defaultdict[str, dict[str, float]] = defaultdict(dict)
@@ -285,15 +181,13 @@ def compare_all(
 	for left, right in tqdm(
 		tuple(itertools.combinations(point_sets, 2)), 'Comparing point sets', unit='point set'
 	):
-		score, closest_dist, closest_a, closest_b = get_point_set_distance(
-			left, right, method, use_tqdm=False
-		)
-		scores[left.name][right.name] = scores[right.name][left.name] = score
-		closests[left.name][right.name] = closest_dist, closest_a, closest_b
+		dist = get_point_set_distance(left, right, method, use_tqdm=False)
+		scores[left.name][right.name] = scores[right.name][left.name] = dist.distance
+		closests[left.name][right.name] = dist.closest_distance, dist.closest_a, dist.closest_b
 		closests[right.name][left.name] = (
-			closest_dist,
-			closest_b,
-			closest_a,
+			dist.closest_distance,
+			dist.closest_b,
+			dist.closest_a,
 		)  # That's symmetrical, right? Yeah nah should be
 
 	if raw_output_path:
@@ -326,6 +220,54 @@ def compare_all(
 		output_dataframe(df, output_path)
 
 
+async def load_data(args: Namespace):
+	subs_path = args.subs_path
+	if not subs_path:
+		settings = Settings()
+		subs_path = settings.subs_per_player_path
+
+	all_subs = await load_or_fetch_per_player_submissions(subs_path)
+	left_player = (
+		await load_point_set_from_arg(
+			args.left_player,
+			args.lat_col_left,
+			args.lng_col_left,
+			args.crs_left,
+			args.name_col_left,
+			all_subs=all_subs,
+			force_unheadered=args.unheadered_left,
+		)
+		if args.left_player
+		else None
+	)
+	right_player_args: list[str] = args.right_player
+	if right_player_args:
+		right_players = [
+			await load_point_set_from_arg(
+				right_player,
+				args.lat_col_right,
+				args.lng_col_right,
+				args.crs_right,
+				args.name_col_right,
+				all_subs=all_subs,
+				force_unheadered=args.unheadered_right,
+			)
+			for right_player in right_player_args
+		]
+	else:
+		right_players = []
+
+	all_point_sets = [PointSet(gdf, name) for name, gdf in all_subs.items()]
+	skipped: set[str] = set(args.exclude_player or ())
+	threshold: int | None = args.threshold
+	all_point_sets = [
+		ps
+		for ps in all_point_sets
+		if not ((skipped and ps.name in skipped) or (threshold and ps.count < threshold))
+	]
+	return all_point_sets, left_player, right_players
+
+
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	left_group = argparser.add_argument_group(
@@ -336,16 +278,15 @@ def main() -> None:
 		'Controls loading of the second point set (the "right" side). All except right_path will only have an effect if comparing one at a time.',
 	)
 	left_group.add_argument(
-		'left_path',
+		'left_player',
 		nargs='?',
-		type=Path,
-		help='Path to left point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc)',
+		help='Path to left point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc) or player:<name> or username:<username>',
 	)
 	right_group.add_argument(
-		'right_path',
+		'right_player',
 		type=Path,
 		nargs='*',
-		help='Path to right point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc). If this is multiple, compares left_path to all sets. If not specified, compares left_path to every other TPG player.',
+		help='Path to right point set (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc) or player:<name> or username:<username>. If this is specified multiple times, compares left_path to all sets. If not specified, compares left_path to every other TPG player.',
 	)
 	left_group.add_argument(
 		'--player-name',
@@ -357,7 +298,7 @@ def main() -> None:
 		type=Path,
 		help='Path to file to load submissions per player from (can be a TPG data file), or the value of the SUBS_PER_USER_PATH by default. If not set, loads from API',
 	)
-	argparser.add_argument('--exclude-player', nargs='*', help='Exclude player(s) by name')
+	argparser.add_argument('--exclude-player', nargs='*', help='Exclude player(s) by username')
 	argparser.add_argument(
 		'--threshold',
 		type=int,
@@ -391,20 +332,17 @@ def main() -> None:
 	args = argparser.parse_args()
 	method = methods[args.method] if args.method else None
 
-	subs_path = args.subs_path
-	if not subs_path:
-		settings = Settings()
-		subs_path = settings.subs_per_player_path
-
-	right_paths = args.right_path
-	if len(right_paths) == 1:
-		# TODO: Mayhaps allow using a player name as argument and getting submissions
-		compare_two_paths(args.left_path, right_paths[0], args, method)
-	elif args.left_path:
-		compare_one_to_many(args.left_path, right_paths, args, method, subs_path, args.output_path)
+	all_players, left, right = asyncio.run(load_data(args))
+	if left:
+		if len(right) == 1:
+			compare_two(left, right[0], method)
+		else:
+			if not right:
+				right = [ps for ps in all_players if ps.name not in {left.name, args.player_name}]
+			compare_one_to_many(left, right, method, args.output_path)
 	else:
 		compare_all(
-			args, method, subs_path, args.raw_output_path, args.output_path, args.graph_output_path
+			all_players, method, args.raw_output_path, args.output_path, args.graph_output_path
 		)
 
 

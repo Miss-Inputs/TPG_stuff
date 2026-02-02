@@ -14,7 +14,7 @@ from travelpygame import (
 	load_points_async,
 	validate_points,
 )
-from travelpygame.tpg_data import get_player_username
+from travelpygame.tpg_data import PlayerUsername, get_player_username
 from travelpygame.util import format_point, maybe_set_index_name_col, try_auto_set_index
 from travelpygame.util.io_utils import dataframe_exts, known_geo_exts, maybe_load_geodataframe
 
@@ -52,6 +52,7 @@ async def load_path_or_player(
 	lng_col: str | None = None,
 	crs_arg: str | None = None,
 	name_col: str | None = None,
+	all_subs: 'dict[PlayerUsername, GeoDataFrame] | None' = None,
 	*,
 	force_unheadered: bool = False,
 ) -> tuple[str, 'GeoDataFrame']:
@@ -60,10 +61,10 @@ async def load_path_or_player(
 		username = await get_player_username(player_name)
 		if username is None:
 			raise KeyError(f'No player with display name {player_name} found')
-		gdf = await _load_by_username(username)
+		gdf = await _load_by_username(username) if all_subs is None else all_subs[username]
 	elif path_or_name.startswith('username:'):
 		name = username = path_or_name.removeprefix('username:')
-		gdf = await _load_by_username(username)
+		gdf = await _load_by_username(username) if all_subs is None else all_subs[username]
 	else:
 		path = Path(path_or_name)
 		name = path.stem
@@ -94,11 +95,12 @@ async def load_point_set_from_arg(
 	crs_arg: str | None = None,
 	name_col: str | None = None,
 	projected_crs_arg: str | None = None,
+	all_subs: 'dict[PlayerUsername, GeoDataFrame]|None'=None,
 	*,
 	force_unheadered: bool = False,
 ) -> PointSet:
 	name, gdf = await load_path_or_player(
-		path_or_name, lat_col, lng_col, crs_arg, name_col, force_unheadered=force_unheadered
+		path_or_name, lat_col, lng_col, crs_arg, name_col, all_subs, force_unheadered=force_unheadered
 	)
 
 	return PointSet(gdf, name, projected_crs_arg)
