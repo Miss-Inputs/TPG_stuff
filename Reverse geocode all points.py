@@ -2,17 +2,20 @@
 """Get the address of all points in a point set from Nominatim."""
 
 import asyncio
+import logging
 from argparse import ArgumentParser
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pandas
 from aiohttp import ClientSession
-from pandas import Series
+from geopandas import GeoDataFrame
 from shapely import Point
 from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import PointSet, output_geodataframe
-from travelpygame.reverse_geocode import get_address_nominatim
+from travelpygame.reverse_geocode import get_address_components_nominatim, get_address_nominatim
 
 from lib.io_utils import load_point_set_from_arg
 
@@ -70,7 +73,40 @@ async def get_addresses(
 					)
 					results[index] = address
 
-	return Series(results)
+	return pandas.Series(results)
+
+
+async def get_components(point_set: PointSet, endpoint: str | None, language: str | None):
+	user_agent = 'https://github.com/Miss-Inputs/TPG_stuff'
+	if endpoint:
+		user_agent = f'{user_agent} (user specified endpoint)'
+	async with ClientSession(headers={'User-Agent': user_agent}) as sesh:
+		results = {}
+		with tqdm(point_set.points.items(), 'Reverse geocoding', point_set.count, unit='row') as t:
+			for index, geometry in t:
+				t.set_postfix(index=index)
+				if not isinstance(geometry, Point):
+					tqdm.write(f'{index} was not a Point but instead {type(geometry)}, ignoring')
+					continue
+				response = await get_address_components_nominatim(
+					geometry.y, geometry.x, sesh, language, endpoint
+				)
+				if not response or not response.features:
+					continue
+				# Hrm, maybe I should have just used jsonv2 with addressdetails=1, I dunno
+				properties = response.features[0].properties.geocoding
+				results[index] = properties.model_dump(
+					exclude={'admin', 'accuracy'}, exclude_none=True
+				)
+
+	df = pandas.DataFrame.from_dict(results, 'index')
+	needs_rename = {
+		col
+		for col in df.columns
+		if col in {'name', point_set.gdf.index.name} or col in point_set.gdf.columns
+	}
+	df = df.rename(columns={col: f'osm_{col}' for col in needs_rename})
+	return df.dropna(how='all', axis='columns')
 
 
 async def main() -> None:
@@ -82,6 +118,12 @@ async def main() -> None:
 	point_set_args.add_argument(
 		'point_set',
 		help='Path to file (.csv, .ods, .xls, .xlsx, pickled DataFrame, GeoJSON, etc) or player:<name>/username:<username>.',
+	)
+	argparser.add_argument(
+		'--mode',
+		choices=('address', 'components', 'null'),
+		default='address',
+		help='Can be address (default) to get the address, components to add each individual component of the address (country/state/etc) as columns, or null to skip reverse geocoding and just copy the point set',
 	)
 	output_args.add_argument(
 		'--output-path',
@@ -121,8 +163,7 @@ async def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 
-	# TODO: We want an option here to reverse geocode locally from a geofile, using GADM or whatever else
-	# TODO: Also an option to get the components
+	# TODO: We want an option here to reverse geocode locally from a geofile, using GADM or whatever else the user passes in (though using the stuff in settings could be handy)
 
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
@@ -130,13 +171,22 @@ async def main() -> None:
 	point_set = await load_point_set_from_arg(
 		args.point_set, args.lat_col, args.lng_col, args.crs, force_unheadered=args.unheadered
 	)
-	addresses = await get_addresses(point_set, args.endpoint, args.language, parallel=False)
-	print(addresses)
 	gdf = point_set.gdf.copy()
-	gdf[args.column_name] = addresses
+	if args.mode == 'address':
+		addresses = await get_addresses(point_set, args.endpoint, args.language, parallel=False)
+		print(addresses)
+		gdf[args.column_name] = addresses
+	elif args.mode == 'components':
+		components = await get_components(point_set, args.endpoint, args.language)
+		print(components)
+		gdf = pandas.concat((gdf, components), axis='columns').reset_index(names='name')
+		assert isinstance(gdf, GeoDataFrame), f'why is gdf {type(gdf)}'
+
 	if output_path:
 		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
 
 
 if __name__ == '__main__':
-	asyncio.run(main())
+	logging.basicConfig(level=logging.INFO)
+	with logging_redirect_tqdm():
+		asyncio.run(main())
