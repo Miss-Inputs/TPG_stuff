@@ -2,30 +2,30 @@
 """Get the address of all points in a point set from Nominatim."""
 
 import asyncio
-from argparse import ArgumentParser, BooleanOptionalAction
+from argparse import ArgumentParser
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aiohttp import ClientSession
+from pandas import Series
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame import output_geodataframe
-from travelpygame.reverse_geocode import DEFAULT_ENDPOINT, reverse_geocode_address
+from travelpygame import PointSet, output_geodataframe
+from travelpygame.reverse_geocode import get_address_nominatim
 
 from lib.io_utils import load_point_set_from_arg
 
 if TYPE_CHECKING:
-	import geopandas
 	from shapely.geometry.base import BaseGeometry
 
 
-async def _reverse_geocode_row(
+async def _get_row_address(
 	session: ClientSession,
 	index: Hashable,
 	geometry: 'BaseGeometry',
-	endpoint: str | None = DEFAULT_ENDPOINT,
-	language: str | None = 'en',
+	endpoint: str | None,
+	language: str | None,
 ):
 	if not isinstance(geometry, Point):
 		# Feels like it'd be a bit annoying to raise an error here so I'll just pretend it was a point all along
@@ -33,28 +33,24 @@ async def _reverse_geocode_row(
 			f'Note: Index {index} was {type(geometry)}, not Point, converting with representative_point()'
 		)
 		geometry = geometry.representative_point()
-	return index, await reverse_geocode_address(geometry.y, geometry.x, session, language, endpoint)
+	return index, await get_address_nominatim(geometry.y, geometry.x, session, language, endpoint)
 
 
-async def reverse_geocode_all(
-	gdf: 'geopandas.GeoDataFrame',
-	column_name: Hashable,
-	endpoint: str | None = DEFAULT_ENDPOINT,
-	language: str | None = 'en',
-	*,
-	parallel: bool,
+async def get_addresses(
+	point_set: PointSet, endpoint: str | None, language: str | None, *, parallel: bool
 ):
-	async with ClientSession(
-		headers={'User-Agent': 'https://github.com/Miss-Inputs/TPG_stuff'}
-	) as sesh:
-		# TODO: Parallel handling should be improved (and also technically the name is wrong but swagever), have the number of connections manually specified instead. Although maybe we should just remove it
+	user_agent = 'https://github.com/Miss-Inputs/TPG_stuff'
+	if endpoint:
+		user_agent = f'{user_agent} (user specified endpoint)'
+	async with ClientSession(headers={'User-Agent': user_agent}) as sesh:
+		# TODO: Parallel handling should be improved (and also technically the name is wrong because asyncio is concurrent instead but swagever), have the number of connections manually specified and use a semaphore etc instead. Although maybe we should just remove it, I've taken the option away from the argument parser for now
 		if parallel:
 			tasks = [
 				asyncio.create_task(
-					_reverse_geocode_row(sesh, index, geometry, endpoint, language),
+					_get_row_address(sesh, index, geometry, endpoint, language),
 					name=f'reverse_geocode {index}',
 				)
-				for index, geometry in gdf.geometry.items()
+				for index, geometry in point_set.points.items()
 			]
 			results = dict(
 				[
@@ -63,14 +59,18 @@ async def reverse_geocode_all(
 				]
 			)
 		else:
-			results = dict(
-				[
-					await _reverse_geocode_row(sesh, index, geometry, endpoint, language)
-					for index, geometry in gdf.geometry.items()
-				]
-			)
-	gdf[column_name] = results
-	return gdf
+			results = {}
+			with tqdm(
+				point_set.points.items(), 'Reverse geocoding', point_set.count, unit='row'
+			) as t:
+				for index, geometry in t:
+					t.set_postfix(index=index)
+					_index, address = await _get_row_address(
+						sesh, index, geometry, endpoint, language
+					)
+					results[index] = address
+
+	return Series(results)
 
 
 async def main() -> None:
@@ -96,10 +96,8 @@ async def main() -> None:
 
 	web_args.add_argument('--endpoint', help='Use a different endpoint')
 	web_args.add_argument(
-		'--parallel',
-		action=BooleanOptionalAction,
-		default=False,
-		help='Use asyncio as_completed to kinda sorta do it in parallel, defaults to false. Do not do this with the default endpoint!!!',
+		'--language',
+		help='Set the language of the response, as a lowercase two-letter language code (defaults to en)',
 	)
 
 	point_set_args.add_argument(
@@ -123,15 +121,19 @@ async def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 
+	# TODO: We want an option here to reverse geocode locally from a geofile, using GADM or whatever else
+	# TODO: Also an option to get the components
+
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
 
 	point_set = await load_point_set_from_arg(
 		args.point_set, args.lat_col, args.lng_col, args.crs, force_unheadered=args.unheadered
 	)
-	gdf = point_set.gdf
-	await reverse_geocode_all(gdf, args.column_name, args.endpoint, parallel=args.parallel)
-	print(gdf)
+	addresses = await get_addresses(point_set, args.endpoint, args.language, parallel=False)
+	print(addresses)
+	gdf = point_set.gdf.copy()
+	gdf[args.column_name] = addresses
 	if output_path:
 		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
 
