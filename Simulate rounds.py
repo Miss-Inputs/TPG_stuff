@@ -33,6 +33,7 @@ from travelpygame.simulation import (
 from travelpygame.tpg_data import PlayerUsername, get_player_display_names, rounds_to_json
 from travelpygame.util import (
 	format_dataframe,
+	format_distance,
 	format_point,
 	format_xy,
 	output_dataframe,
@@ -232,6 +233,8 @@ def simulate_single_round(sim: Simulation, output_path: Path | None):
 	df = DataFrame(rows)
 	df.insert(0, 'rank', df.pop('rank'))
 
+	median_distance = df['distance'].median()
+	print('Median distance:', format_distance(median_distance))
 	print(format_dataframe(df, distance_cols=('distance')))
 	if output_path:
 		output_dataframe(df, output_path)
