@@ -1,73 +1,98 @@
 #!/usr/bin/env python3
-"""Find all the combinations of midpoints for you and your teammate in TPG"""
+"""Find all the combinations of midpoints for you and your teammate in TPG, or you and yourself."""
 
 import asyncio
 import itertools
+import logging
 from argparse import ArgumentParser
-from contextlib import nullcontext
+from collections.abc import Hashable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import geopandas
-import pandas
-from aiohttp import ClientSession
+from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame.util import format_point, get_midpoint, load_points_async, output_geodataframe
+from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame.util import geod_distance, get_midpoint, output_geodataframe
 
-from lib.format_utils import describe_point
+from lib.io_utils import load_point_set_from_arg
+
+if TYPE_CHECKING:
+	from travelpygame.point_set import PointSet
+
+logger = logging.getLogger(Path(__file__).stem)
+
+ItemType = tuple[Hashable, Point]
 
 
-async def get_row_midpoint(
-	row_1: pandas.Series, row_2: pandas.Series, session: ClientSession | None
-):
-	point_1 = row_1.geometry
-	point_2 = row_2.geometry
+def get_row_midpoint(item_1: ItemType, item_2: ItemType):
+	name_1, point_1 = item_1
+	name_2, point_2 = item_2
 	midpoint = get_midpoint(point_1, point_2)
+	name = f'{name_1} + {name_2}'
+	return {'geometry': midpoint, 'name': name}
 
-	desc_1 = row_1.get('desc', row_1.get('name', row_1.get('location', None)))
-	desc_2 = row_2.get('desc', row_2.get('name', row_2.get('location', None)))
-	if session:
-		desc_1 = await describe_point(point_1, session) if pandas.isna(desc_1) else desc_1
-		desc_2 = await describe_point(point_2, session) if pandas.isna(desc_2) else desc_2
-	else:
-		desc_1 = format_point(point_1) if pandas.isna(desc_1) else desc_1
-		desc_2 = format_point(point_2) if pandas.isna(desc_2) else desc_2
-	desc = f'{desc_1} + {desc_2}'
-	return {'geometry': midpoint, 'name': desc}
+
+def _ensure_only_points(point_set: 'PointSet'):
+	a: list[ItemType] = []
+	for name, point in point_set.points.items():
+		if not isinstance(point, Point):
+			logger.warning(
+				'Ignoring row %s in %s which was a %s and not a Point',
+				name,
+				point_set.name,
+				type(point),
+			)
+		else:
+			a.append((name, point))
+	return a
 
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
-	argparser.add_argument('path1', type=Path)
+	argparser.add_argument('point_set', help='Path to file containing points, or player:/username:')
 	argparser.add_argument(
-		'path2',
+		'point_set_2',
 		nargs='?',
-		type=Path,
-		help='If not specified, get midpoints of points in path1 with other points',
+		help="Teammate's point set. If not specified, get midpoints from point_set and itself",
 	)
-	argparser.add_argument('--out-path', type=Path)
 	argparser.add_argument(
-		'--reverse-geocode',
-		action='store_true',
-		help='Use reverse geocoding for the name of unnamed points',
+		'--min-distance',
+		'--minimum-distance',
+		type=float,
+		help='If specified, only consider pairs of points that are this distance (in km) apart from each other.',
 	)
-	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col, and use "desc" or "name" as the name column
+	argparser.add_argument(
+		'--out-path', type=Path, help='Optionally save midpoints to here (geojson/csv/etc)'
+	)
+	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col, and use a normal name column
 	args = argparser.parse_args()
 
-	gdf_1 = await load_points_async(args.path1)
-	gdf_1 = gdf_1.drop_duplicates('geometry')
-	if args.path2:
-		gdf_2 = await load_points_async(args.path2)
-		gdf_2 = gdf_2.drop_duplicates('geometry')
-		total = gdf_1.index.size * gdf_2.index.size
-		combinations = itertools.product(gdf_1.iterrows(), gdf_2.iterrows())
+	ps_1 = await load_point_set_from_arg(args.point_set)
+	points_1 = _ensure_only_points(ps_1)
+	if args.point_set_2:
+		ps_2 = await load_point_set_from_arg(args.point_set_2)
+		points_2 = _ensure_only_points(ps_2)
+		total = len(points_1) * len(points_2)
+		combinations = itertools.product(points_1, points_2)
 	else:
-		combinations = tuple(itertools.combinations(gdf_1.iterrows(), 2))
+		combinations = tuple(itertools.combinations(points_1, 2))
+		total = len(combinations)
+
+	min_dist: float | None = args.min_distance
+	if min_dist is not None:
+		min_dist *= 1_000
+		# There is probably a way to vectorize this but I thought too hard about it
+		combinations = [
+			(item_1, item_2)
+			for item_1, item_2 in combinations
+			if geod_distance(item_1[1], item_2[1]) >= min_dist
+		]
 		total = len(combinations)
 
 	data = []
-	async with ClientSession() if args.reverse_geocode else nullcontext() as session:
-		for (_index1, row1), (_index2, row2) in tqdm(combinations, total=total):
-			data.append(await get_row_midpoint(row1, row2, session))
+	for item1, item2 in tqdm(combinations, total=total):
+		data.append(get_row_midpoint(item1, item2))
 
 	gdf = geopandas.GeoDataFrame(data, crs='wgs84')
 	print(gdf)
@@ -76,4 +101,6 @@ async def main() -> None:
 
 
 if __name__ == '__main__':
-	asyncio.run(main())
+	logging.basicConfig(level=logging.INFO)
+	with logging_redirect_tqdm():
+		asyncio.run(main())
