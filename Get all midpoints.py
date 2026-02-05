@@ -4,7 +4,7 @@
 import asyncio
 import itertools
 import logging
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,7 +13,8 @@ import geopandas
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.util import geod_distance, get_midpoint, output_geodataframe
+from travelpygame.util import geod_distance, output_geodataframe
+from travelpygame.util.geo_utils import get_midpoint, get_midpoint_centre
 
 from lib.io_utils import load_point_set_from_arg
 
@@ -25,10 +26,14 @@ logger = logging.getLogger(Path(__file__).stem)
 ItemType = tuple[Hashable, Point]
 
 
-def get_row_midpoint(item_1: ItemType, item_2: ItemType):
+def get_row_midpoint(item_1: ItemType, item_2: ItemType, *, use_sphere_method: bool):
 	name_1, point_1 = item_1
 	name_2, point_2 = item_2
-	midpoint = get_midpoint(point_1, point_2)
+	midpoint = (
+		get_midpoint_centre(point_1, point_2)
+		if use_sphere_method
+		else get_midpoint(point_1, point_2)
+	)
 	name = f'{name_1} + {name_2}'
 	return {'geometry': midpoint, 'name': name}
 
@@ -55,6 +60,12 @@ async def main() -> None:
 		'point_set_2',
 		nargs='?',
 		help="Teammate's point set. If not specified, get midpoints from point_set and itself",
+	)
+	argparser.add_argument(
+		'--use-sphere',
+		action=BooleanOptionalAction,
+		default=True,
+		help='For compatibility with existing TPG tools/spinoffs that use midpoints, use the centre of the points on a sphere to find midpoints. Defaults to true.',
 	)
 	argparser.add_argument(
 		'--min-distance',
@@ -92,7 +103,7 @@ async def main() -> None:
 
 	data = []
 	for item1, item2 in tqdm(combinations, total=total):
-		data.append(get_row_midpoint(item1, item2))
+		data.append(get_row_midpoint(item1, item2, use_sphere_method=args.use_sphere))
 
 	gdf = geopandas.GeoDataFrame(data, crs='wgs84')
 	print(gdf)
