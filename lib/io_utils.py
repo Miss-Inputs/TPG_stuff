@@ -83,7 +83,7 @@ async def load_path_or_player(
 	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, path_or_name)
 	if not new_name_col:
 		logger.info('%s had default index, formatting points', path_or_name)
-		gdf.index = pandas.Index(gdf.geometry.map(format_point))
+		gdf.index = pandas.Index(gdf.geometry.map(format_point), name='name')
 	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
 	return name, gdf.drop(index=list(to_drop)) if to_drop else gdf
 
@@ -95,12 +95,18 @@ async def load_point_set_from_arg(
 	crs_arg: str | None = None,
 	name_col: str | None = None,
 	projected_crs_arg: str | None = None,
-	all_subs: 'dict[PlayerUsername, GeoDataFrame]|None'=None,
+	all_subs: 'dict[PlayerUsername, GeoDataFrame]|None' = None,
 	*,
 	force_unheadered: bool = False,
 ) -> PointSet:
 	name, gdf = await load_path_or_player(
-		path_or_name, lat_col, lng_col, crs_arg, name_col, all_subs, force_unheadered=force_unheadered
+		path_or_name,
+		lat_col,
+		lng_col,
+		crs_arg,
+		name_col,
+		all_subs,
+		force_unheadered=force_unheadered,
 	)
 
 	return PointSet(gdf, name, projected_crs_arg)
