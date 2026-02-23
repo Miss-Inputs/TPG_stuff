@@ -14,10 +14,10 @@ from aiohttp import ClientSession
 from numpy.random import default_rng
 from pandas import Series
 from pyproj import Transformer
-from shapely import MultiPolygon, Point, Polygon
+from shapely import MultiPolygon, Point
 from tqdm.auto import tqdm
 from travelpygame import output_geodataframe, random_point_in_poly, random_points_in_poly
-from travelpygame.util import format_distance, format_point, read_geodataframe_async
+from travelpygame.util import format_distance, format_point, get_polygons, read_geodataframe_async
 
 from lib.format_utils import describe_point
 from lib.stats import get_longest_distance_from_point, summarize_counter
@@ -31,7 +31,6 @@ def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: lis
 
 
 async def _random_single_point_in_poly(
-	poly: Polygon | MultiPolygon | None,
 	gdf: 'geopandas.GeoDataFrame',
 	to_wgs84: Transformer | None,
 	value_cols: list[str],
@@ -53,12 +52,13 @@ async def _random_single_point_in_poly(
 		elif reverse_geocode:
 			desc = await describe_point(point, sesh)
 			print(desc)
-		if stats and poly:
+		if stats:
 			utm = gdf.estimate_utm_crs()
-			to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
+			poly = MultiPolygon(get_polygons(gdf.to_crs('wgs84')))
+			to_utm = Transformer.from_crs('wgs84', utm, always_xy=True)
 
 			utm_poly = shapely.ops.transform(to_utm.transform, poly)
-			utm_point = shapely.ops.transform(to_utm.transform, raw_point)
+			utm_point = shapely.ops.transform(to_utm.transform, point)
 			utm_furthest_point, distance = get_longest_distance_from_point(utm_poly, utm_point)
 			furthest_point = shapely.ops.transform(
 				partial(to_utm.transform, direction='INVERSE'), utm_furthest_point
@@ -181,27 +181,10 @@ async def main() -> None:
 	else:
 		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
-	if args.stats and n == 1:
-		# Now we only need to generate the union if we want stats for a single point
-		if gdf.index.size == 1 and isinstance(gdf.geometry.iloc[0], (Polygon, MultiPolygon)):
-			poly = gdf.geometry.iloc[0]
-			assert isinstance(poly, (Polygon, MultiPolygon)), 'what'
-		else:
-			poly = gdf.union_all()
-			if not isinstance(poly, (Polygon, MultiPolygon)):
-				raise TypeError(f'{path} must contain polygon(s), got {type(poly)}')
-	else:
-		poly = None
 
 	if n == 1:
 		await _random_single_point_in_poly(
-			poly,
-			gdf,
-			to_wgs84,
-			value_cols,
-			seed,
-			stats=args.stats,
-			reverse_geocode=args.reverse_geocode,
+			gdf, to_wgs84, value_cols, seed, stats=args.stats, reverse_geocode=args.reverse_geocode
 		)
 	else:
 		points = await _random_points_in_poly(
