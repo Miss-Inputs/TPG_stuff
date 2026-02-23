@@ -34,7 +34,6 @@ async def _random_single_point_in_poly(
 	poly: Polygon | MultiPolygon | None,
 	gdf: 'geopandas.GeoDataFrame',
 	to_wgs84: Transformer | None,
-	to_utm: Transformer,
 	value_cols: list[str],
 	seed: int | None,
 	*,
@@ -55,6 +54,9 @@ async def _random_single_point_in_poly(
 			desc = await describe_point(point, sesh)
 			print(desc)
 		if stats and poly:
+			utm = gdf.estimate_utm_crs()
+			to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
+
 			utm_poly = shapely.ops.transform(to_utm.transform, poly)
 			utm_point = shapely.ops.transform(to_utm.transform, raw_point)
 			utm_furthest_point, distance = get_longest_distance_from_point(utm_poly, utm_point)
@@ -86,10 +88,11 @@ async def _random_points_in_poly(
 	)
 	if to_wgs84:
 		points = [shapely.ops.transform(to_wgs84.transform, point) for point in points]
+	gdf_wgs84 = gdf if gdf.crs and gdf.crs.equals('wgs84') else gdf.to_crs('wgs84')
 	async with ClientSession() as sesh:
 		for i, point in enumerate(points):
 			if value_cols:
-				data = _get_point_data(point, gdf, value_cols)
+				data = _get_point_data(point, gdf_wgs84, value_cols)
 				desc = ', '.join(str(datum) for datum in data)
 				if stats:
 					for k, v in data.items():
@@ -160,6 +163,7 @@ async def main() -> None:
 	argparser.add_argument(
 		'--output-path', type=Path, help='Output generated points here, if n is more than 1'
 	)
+	argparser.add_argument('--crs', help='Project to a CRS first to see if that helps')
 	args = argparser.parse_args()
 
 	path = args.path
@@ -169,13 +173,13 @@ async def main() -> None:
 	value_cols: list[str] = args.value_cols
 
 	gdf = await read_geodataframe_async(path)
+	if args.crs:
+		gdf = gdf.to_crs(args.crs)
+
 	if gdf.crs and gdf.crs.equals('wgs84'):
 		to_wgs84 = None
 	else:
 		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
-	utm = gdf.estimate_utm_crs()
-	to_utm = Transformer.from_crs(gdf.crs, utm, always_xy=True)
-
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
 	if args.stats and n == 1:
 		# Now we only need to generate the union if we want stats for a single point
@@ -194,7 +198,6 @@ async def main() -> None:
 			poly,
 			gdf,
 			to_wgs84,
-			to_utm,
 			value_cols,
 			seed,
 			stats=args.stats,
