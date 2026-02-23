@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pyproj
 import rasterio
+import shapely
 from numpy.ma import masked
 from pandas import RangeIndex
 from tqdm.auto import tqdm
@@ -51,7 +52,9 @@ def main() -> None:
 		help='Explicitly treat csv/Excel as not having a header, otherwise autodetect (and default to yes header if unknown)',
 	)
 	point_set_args.add_argument(
-		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
+		'--crs',
+		default='wgs84',
+		help='Coordinate reference system that the point set uses (if loading from a file format that does not specify it, such as CSV), defaults to WGS84',
 	)
 
 	dem_args.add_argument(
@@ -91,7 +94,11 @@ def main() -> None:
 		print('Upper left:', dem.transform * (0, 0))
 		print('Lower right:', dem.transform * (dem.width, dem.height))
 
-		coords = point_set.coord_array
+		if not dem_crs.equals(gdf.crs):
+			print('Need to reproject point set')
+			coords = shapely.get_coordinates(gdf.geometry.to_crs(dem_crs))
+		else:
+			coords = point_set.coord_array
 		data = [
 			None if values[0] is masked else values[0]
 			for values in dem.sample(
