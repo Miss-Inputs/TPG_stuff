@@ -114,7 +114,7 @@ async def _random_points_in_poly(
 			tqdm.write(f'{col}:')
 			tqdm.write(str(summarize_counter(counter)))
 			tqdm.write('-' * 10)
-	return geopandas.GeoDataFrame(rows, geometry='point', crs=gdf.crs)
+	return geopandas.GeoDataFrame(rows, geometry='point', crs='wgs84')
 
 
 async def main() -> None:
