@@ -165,7 +165,7 @@ def main() -> None:
 	tie_threshold: float = args.tie_detection_threshold
 	if tie_threshold:
 		for r in rounds:
-			#TODO: We're just printing it for now but this should go in load_scored_rounds instead once we actually handle ties
+			# TODO: We're just printing it for now but this should go in load_scored_rounds instead once we actually handle ties
 			probably_tied = detect_likely_ties(r.submissions, tie_threshold)
 			if probably_tied:
 				print(f'Probably tied for round {r.display_name}: {probably_tied}')
@@ -174,9 +174,7 @@ def main() -> None:
 		output_path.write_text(rounds_to_json(rounds))
 
 	points, distance, medals = (
-		make_leaderboards(rounds[:-1])
-		if args.ongoing_round
-		else make_leaderboards(rounds)
+		make_leaderboards(rounds[:-1]) if args.ongoing_round else make_leaderboards(rounds)
 	)
 	print(points)
 	if output_path:
@@ -200,11 +198,8 @@ def main() -> None:
 	print(latest_round.name, latest_round.latitude, latest_round.longitude)
 
 	df['distance'] = df['distance'].map(format_distance)
-	print(
-		df.drop(columns=['latitude', 'longitude'])
-		.set_index('name')
-		.to_string(max_colwidth=60)
-	)
+	with pandas.option_context('display.max_rows', None):
+		print(df.drop(columns=['latitude', 'longitude']).set_index('name'))
 
 	submitted_names = frozenset(df['name'])
 	needs_reminder = reminder_list - submitted_names
