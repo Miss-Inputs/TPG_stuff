@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetches current main TPG data if it is not there"""
+"""Fetches current main TPG data if it is not there. This is also not used as much anymore."""
 
 import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction

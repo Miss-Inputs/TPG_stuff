@@ -55,7 +55,7 @@ def compare_rounds(old_round: Round, new_round: Round, name: str | None):
 		if old_winner.name != new_round.submissions[0].name:
 			# TODO: Output this somewhere
 			print(
-				f'{old_round.name}: Winner was {old_round.submissions[0].name}, now {new_round.submissions[0].name}'
+				f'{old_round.display_name}: Winner was {old_round.submissions[0].name}, now {new_round.submissions[0].name}'
 			)
 	if name:
 		old_sub = next((sub for sub in old_round.submissions if sub.name == name), None)
@@ -63,11 +63,15 @@ def compare_rounds(old_round: Round, new_round: Round, name: str | None):
 			return
 		new_sub = next(sub for sub in new_round.submissions if sub.name == name)
 		if old_sub.rank is not None and new_sub.rank is not None and old_sub.rank != new_sub.rank:
-			print(f'{old_round.name}: Placing changed from {old_sub.rank} to {new_sub.rank}')
+			print(
+				f'{old_round.display_name}: Placing changed from {old_sub.rank} to {new_sub.rank}'
+			)
 		if (old_sub.latitude != new_sub.latitude) or (old_sub.longitude != new_sub.longitude):
 			old_desc = old_sub.description or format_xy(old_sub.longitude, old_sub.latitude)
 			new_desc = new_sub.description or format_xy(new_sub.longitude, new_sub.latitude)
-			print(f'{old_round.name}: Previously submitted {old_desc}, now would submit {new_desc}')
+			print(
+				f'{old_round.display_name}: Previously submitted {old_desc}, now would submit {new_desc}'
+			)
 
 
 def get_simulation(
@@ -87,7 +91,7 @@ def get_simulation(
 
 	if existing_rounds:
 		for r in existing_rounds:
-			round_name = r.name or f'Round {r.number}'
+			round_name = r.display_name
 			rounds[round_name] = r.target
 			order[round_name] = r.number
 	elif targets_path:
@@ -128,6 +132,7 @@ def output_results(
 ):
 	if existing_rounds:
 		for result in new_rounds:
+			# TODO: Should this compare r.number instead?
 			r = next((r for r in existing_rounds if r.name == result.name), None)
 			if r:
 				compare_rounds(r, result, name)

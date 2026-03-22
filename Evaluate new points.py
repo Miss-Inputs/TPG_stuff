@@ -187,7 +187,7 @@ async def eval_with_rounds(
 			old_best = current_best
 			current_best: str = current_points.points.index[current_best_index]
 			print(
-				f'Round {r.name} would already be improved by {current_best} over {old_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
+				f'Round {r.display_name} would already be improved by {current_best} over {old_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
 			)
 			distance = current_distance
 			if current_distance < current_diff.rival_distance:
@@ -230,7 +230,7 @@ async def eval_with_rounds(
 				# Can happen if the new pic won't help any more than something from current_points would
 				continue
 			row = {
-				'round': r.name,
+				'round': r.display_name,
 				'old_pic': old_desc,
 				'old_rank': f'{old_rank}/{current_diff.round_num_players}',
 				'rival': current_diff.rival,

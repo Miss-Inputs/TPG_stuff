@@ -39,7 +39,7 @@ def get_closest_placings(
 			continue
 
 		row = {
-			'round': r.name or r.number,
+			'round': r.display_name,
 			'season': r.season,
 			'target': format_xy(r.longitude, r.latitude),
 			'distance': rival_diff.player_distance,
@@ -98,11 +98,11 @@ def main() -> None:
 			help='Path to save results as CSV. If using --project-forward, this can also be GeoJSON/gpkg/etc',
 		)
 		args = argparser.parse_args()
-		use_haversine = args.haversine
-		project_forward = args.project_forward
+		use_haversine: bool = args.haversine
+		project_forward: bool = args.project_forward
 		name = args.name
-		rounds_path = args.rounds_path
-		output_path = args.output_path
+		rounds_path: Path | None = args.rounds_path
+		output_path: Path | None = args.output_path
 
 	settings = Settings()
 	rounds = (

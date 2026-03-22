@@ -83,7 +83,7 @@ async def main() -> None:
 
 			rows.append(
 				{
-					'Round': r.name or str(r.number),
+					'Round': r.display_name,
 					'Number of submissions': len(r.submissions),
 					'Number of submissions within threshold': (distances <= world_distance).sum(),
 					'Average distance': avg_distance / 1_000,

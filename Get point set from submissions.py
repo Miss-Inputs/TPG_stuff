@@ -40,7 +40,7 @@ async def main() -> None:
 			if sub.name != args.name:
 				continue
 			point = Point(sub.longitude, sub.latitude)
-			usages[point].append(r.name or f'Round {r.number}')
+			usages[point].append(r.display_name)
 	if not usages:
 		print(f'Did not find any submissions by {args.name}')
 		return

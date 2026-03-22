@@ -190,12 +190,12 @@ def main() -> None:
 	df = pandas.DataFrame([s.model_dump() for s in latest_round.submissions])
 	df = df.dropna(axis='columns', how='all')
 	if output_path:
-		round_output_path = output_path.with_name(f'{output_path.stem} - {latest_round.name}.csv')
+		round_output_path = output_path.with_name(f'{output_path.stem} - {latest_round.display_name}.csv')
 		df['distance_km'] = df['distance'] / 1_000
 		df.drop(columns='distance').to_csv(round_output_path, index=False)
 
 	# Print them all so we know who to sort where in what order, and for top 3 result post etc
-	print(latest_round.name, latest_round.latitude, latest_round.longitude)
+	print(latest_round.display_name, latest_round.latitude, latest_round.longitude)
 
 	df['distance'] = df['distance'].map(format_distance)
 	with pandas.option_context('display.max_rows', None):
