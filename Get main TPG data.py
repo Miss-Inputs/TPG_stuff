@@ -3,6 +3,7 @@
 
 import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
+from operator import attrgetter
 from pathlib import Path
 
 from tqdm.auto import tqdm
@@ -26,15 +27,13 @@ async def main() -> None:
 		help='Path to save data to, defaults to MAIN_TPG_DATA_PATH environment variable if set. If that is not set and this argument is not given, this is not very useful.',
 	)
 	argparser.add_argument(
-		'--subs-per-player-path',
-		type=Path,
-		help='Path to save per-player submissions to, defaults to SUBS_PER_PLAYER_PATH environment variable if set. If that is not set and this argument is not given, this is not very useful.',
-	)
-	argparser.add_argument(
 		'--refresh',
 		action=BooleanOptionalAction,
 		default=True,
 		help='Fetch data again instead of loading from file, defaults to true',
+	)
+	argparser.add_argument(
+		'--game-id', type=int, default=1, help='ID of game to get, defaults to 1 (main world TPG)'
 	)
 	argparser.add_argument(
 		'--score',
@@ -44,15 +43,19 @@ async def main() -> None:
 	)
 
 	args = argparser.parse_args()
-	settings = Settings()
 
-	data_path: Path | None = args.data_path or settings.main_tpg_data_path
+	data_path: Path | None = args.data_path
+	game_id: int = args.game_id
+	if not data_path and game_id == 1:
+		settings = Settings()
+		data_path = settings.main_tpg_data_path
 
 	rounds = (
-		await get_main_tpg_rounds()
+		await get_main_tpg_rounds(game_id)
 		if args.refresh
-		else await get_main_tpg_rounds_with_path(data_path)
+		else await get_main_tpg_rounds_with_path(data_path, game_id)
 	)
+	rounds.sort(key=attrgetter('number'))
 	if args.score:
 		rounds = [
 			score_round(r, main_tpg_scoring, fivek_threshold=None)
