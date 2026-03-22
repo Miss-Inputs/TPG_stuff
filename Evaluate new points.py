@@ -89,13 +89,14 @@ async def eval_with_targets(
 	target_paths: list[Path],
 	target_output_path: Path | None,
 	output_path: Path | None,
+	target_name_col: str | None,
 	*,
 	use_haversine: bool = True,
 	find_if_any_pics_better: bool = True,
 ):
 	"""The function name kinda sucks but if it starts with test_ then Ruff thinks it's a test function and complains about things accordingly"""
 	targets = await asyncio.to_thread(load_points_or_rounds, target_paths)
-	targets, new_index = maybe_set_index_name_col(targets)
+	targets, new_index = maybe_set_index_name_col(targets, target_name_col)
 	dupe_geometry = targets.duplicated('geometry', keep=False)
 	if dupe_geometry.any():
 		print('Targets had duplicate geometries, only keeping first of each')
@@ -280,8 +281,10 @@ async def eval_with_rounds(
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
-	target_args = argparser.add_argument_group('Target args', 'Select which targets/rounds to test against')
-	output_args= argparser.add_argument_group('Output args', 'Output various things')
+	target_args = argparser.add_argument_group(
+		'Target args', 'Select which targets/rounds to test against'
+	)
+	output_args = argparser.add_argument_group('Output args', 'Output various things')
 
 	argparser.add_argument(
 		'existing_points',
@@ -320,13 +323,14 @@ async def main() -> None:
 		type=Path,
 		help='Test against locations or rounds loaded from this path (geojson/csv/ods/etc or submission tracker kml/kmz)',
 	)
+	target_args.add_argument('--name-col', help='Optional name col to use if loading targets')
 	target_args.add_argument(
 		'--rounds-path',
 		'--data-path',
 		type=Path,
 		help='Test against TPG data loaded from this path to see what rounds could have been improved',
 	)
-	
+
 	output_args.add_argument(
 		'--rounds-output-path',
 		type=Path,
@@ -392,6 +396,7 @@ async def main() -> None:
 			args.targets,
 			args.target_output_path,
 			args.output_path,
+			args.name_col,
 			find_if_any_pics_better=args.find_if_any_pics_better,
 			use_haversine=args.use_haversine,
 		)
