@@ -280,6 +280,9 @@ async def eval_with_rounds(
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
+	target_args = argparser.add_argument_group('Target args', 'Select which targets/rounds to test against')
+	output_args= argparser.add_argument_group('Output args', 'Output various things')
+
 	argparser.add_argument(
 		'existing_points',
 		help='Your existing set of points, as a path to a .csv/.ods/.geojson/etc file, or player:<player display name> or username:<Discord username> to use points that are known to be submitted',
@@ -293,32 +296,10 @@ async def main() -> None:
 		help='Ignore new points that are <= threshold metres away from existing points',
 	)
 	argparser.add_argument(
-		'--targets',
-		nargs=ZERO_OR_MORE,
-		type=Path,
-		help='Test against locations or rounds loaded from this path (geojson/csv/ods/etc or submission tracker kml/kmz)',
-	)
-	argparser.add_argument(
-		'--rounds-path',
-		'--data-path',
-		type=Path,
-		help='Test against TPG data loaded from this path to see what rounds could have been improved',
-	)
-	argparser.add_argument(
-		'--rounds-output-path',
-		type=Path,
-		help='Optionally save results of finding improvements in previous TPG rounds to this file',
-	)
-	argparser.add_argument(
 		'--name',
 		'--player-name',
 		type=str,
 		help='With --rounds-path, your name as it appears in the TPG data, otherwise results may be nonsensical',
-	)
-	argparser.add_argument(
-		'--distances-output-path',
-		type=Path,
-		help='Optionally save distances of each new pic to closest existing pic',
 	)
 	argparser.add_argument(
 		'--find-if-any-pics-better',
@@ -332,12 +313,36 @@ async def main() -> None:
 		help='Use haversine for distances, defaults to true for consistency with main TPG',
 		default=True,
 	)
-	argparser.add_argument(
+
+	target_args.add_argument(
+		'--targets',
+		nargs=ZERO_OR_MORE,
+		type=Path,
+		help='Test against locations or rounds loaded from this path (geojson/csv/ods/etc or submission tracker kml/kmz)',
+	)
+	target_args.add_argument(
+		'--rounds-path',
+		'--data-path',
+		type=Path,
+		help='Test against TPG data loaded from this path to see what rounds could have been improved',
+	)
+	
+	output_args.add_argument(
+		'--rounds-output-path',
+		type=Path,
+		help='Optionally save results of finding improvements in previous TPG rounds to this file',
+	)
+	output_args.add_argument(
+		'--distances-output-path',
+		type=Path,
+		help='Optionally save distances of each new pic to closest existing pic',
+	)
+	output_args.add_argument(
 		'--output-path',
 		type=Path,
 		help='Optional path to save summary of improvements for each new point (one row per new point)',
 	)
-	argparser.add_argument(
+	output_args.add_argument(
 		'--target-output-path',
 		type=Path,
 		help='Optional path to save improved distances to targets (one row per target)',
