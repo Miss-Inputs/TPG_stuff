@@ -60,6 +60,12 @@ def main() -> None:
 		default=' (5K)',
 	)
 	argparser.add_argument(
+		'--bonus-points-in-names',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Parse names suffixed with (+100) (+200) etc to give that player that amount of bonus points. Defaults to true',
+	)
+	argparser.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
 		help='Use haversine instead of WGS geod for scoring (less accurate as it assumes the earth is a sphere, but more consistent with other TPG things), defaults to True',
@@ -98,7 +104,10 @@ def main() -> None:
 	for path in paths:
 		if path.suffix[1:].lower() in {'kml', 'kmz'}:
 			loaded = convert_submission_tracker(
-				path, last_round_num + 1, fivek_suffix=args.fivek_suffix
+				path,
+				last_round_num + 1,
+				fivek_suffix=args.fivek_suffix,
+				parse_bonus_points=args.bonus_points_in_names,
 			)
 		else:
 			loaded = load_rounds(path)
