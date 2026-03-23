@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Gets the most frequently used locations of every player (who has submitted a location more than once, or some other configurable amount.)."""
+"""Gets the most frequently used locations of every player (who has submitted a location more than once, or some other configurable amount.).
+
+Currently, this only uses main TPG data.
+"""
 
 import asyncio
 import logging
