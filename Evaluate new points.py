@@ -115,12 +115,16 @@ async def eval_with_targets(
 			points, new_points.geometry, targets, use_haversine=use_haversine
 		)
 		print('Number of times each pic was better (with all new pics at once):')
-		print(
+		better_count = (
 			better['new_best']
 			.value_counts(sort=False)
 			.reindex(new_points.index, fill_value=0)
 			.sort_values(ascending=False)
 		)
+		print(better_count[better_count > 0])
+		not_better = better_count[better_count == 0]
+		if not not_better.empty:
+			print('Never:', not_better.index.to_list())
 		if target_output_path:
 			await asyncio.to_thread(output_dataframe, better, target_output_path)
 
