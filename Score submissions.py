@@ -13,11 +13,31 @@ from travelpygame import (
 	rounds_to_json,
 )
 from travelpygame.scoring import detect_likely_ties, make_leaderboards, score_round
-from travelpygame.util import format_distance
+from travelpygame.util import format_distance, get_distances
 
 
 def _round_number_getter(r: Round):
 	return r.number
+
+
+def set_ties(rounds: list[Round], tie_threshold: float | None, *, use_haversine: bool):
+	if not tie_threshold:
+		return
+	# We also could have an option to just print likely ties instead of setting is_tie automatically
+
+	for r in rounds:
+		# detect_likely_ties requires distances first
+		points = [sub.point for sub in r.submissions]
+		distances = get_distances(r.target, points, use_haversine=use_haversine)
+		for i, s in enumerate(r.submissions):
+			s.distance = distances[i].item()
+
+		auto_ties = detect_likely_ties(r.submissions, tie_threshold)
+		if auto_ties:
+			print(f'Setting ties automatically for {r.display_name}: {auto_ties}')
+			for s in r.submissions:
+				if s.name in auto_ties:
+					s.is_tie = True
 
 
 def load_scored_rounds(
@@ -25,6 +45,7 @@ def load_scored_rounds(
 	fivek_suffix: str | None,
 	options: ScoringOptions,
 	fivek_threshold: float | None,
+	tie_threshold: float | None,
 	*,
 	bonus_points_in_names: bool,
 	use_haversine: bool,
@@ -44,6 +65,7 @@ def load_scored_rounds(
 		last_round_num = max(r.number for r in loaded)
 		rounds += loaded
 	rounds.sort(key=_round_number_getter)
+	set_ties(rounds, tie_threshold, use_haversine=use_haversine)
 	return [
 		r if r.is_scored else score_round(r, options, fivek_threshold, use_haversine=use_haversine)
 		for r in rounds
@@ -77,12 +99,6 @@ def main() -> None:
 		type=Path,
 		help='Path to save json of scored rounds to, and base name for leaderboards etc',
 	)
-	argparser.add_argument(
-		'--tie-detection-threshold',
-		type=float,
-		default=100,
-		help='Distance in metres to automatically detect submissions as being tied, or 0 to disable. Defaults to 100m',
-	)
 
 	scoring_args.add_argument(
 		'--world-distance',
@@ -103,7 +119,7 @@ def main() -> None:
 		'--5k-threshold',
 		dest='fivek_threshold',
 		type=float,
-		help='Threshold in metres for a submission being close enough to be considered a 5K, used for calculating scoring, defaults to 100m',
+		help='Threshold in metres for a submission being close enough to be considered a 5K, used for calculating scoring, defaults to 100m. 0 to disable',
 		default=100,
 	)
 	scoring_args.add_argument(
@@ -119,6 +135,12 @@ def main() -> None:
 		default=True,
 	)
 
+	kml_args.add_argument(
+		'--tie-detection-threshold',
+		type=float,
+		default=100,
+		help='Distance in metres to automatically detect submissions as being tied, or 0 to disable. Defaults to 100m',
+	)
 	kml_args.add_argument(
 		'--fivek-suffix',
 		'--5k-suffix',
@@ -158,17 +180,10 @@ def main() -> None:
 		args.fivek_suffix,
 		options,
 		args.fivek_threshold,
+		args.tie_detection_threshold,
 		bonus_points_in_names=args.bonus_points_in_names,
 		use_haversine=args.use_haversine,
 	)
-
-	tie_threshold: float = args.tie_detection_threshold
-	if tie_threshold:
-		for r in rounds:
-			# TODO: We're just printing it for now but this should go in load_scored_rounds instead once we actually handle ties
-			probably_tied = detect_likely_ties(r.submissions, tie_threshold)
-			if probably_tied:
-				print(f'Probably tied for round {r.display_name}: {probably_tied}')
 
 	if output_path:
 		output_path.write_text(rounds_to_json(rounds))
@@ -190,7 +205,9 @@ def main() -> None:
 	df = pandas.DataFrame([s.model_dump() for s in latest_round.submissions])
 	df = df.dropna(axis='columns', how='all')
 	if output_path:
-		round_output_path = output_path.with_name(f'{output_path.stem} - {latest_round.display_name}.csv')
+		round_output_path = output_path.with_name(
+			f'{output_path.stem} - {latest_round.display_name}.csv'
+		)
 		df['distance_km'] = df['distance'] / 1_000
 		df.drop(columns='distance').to_csv(round_output_path, index=False)
 
