@@ -3,7 +3,8 @@
 
 import asyncio
 import logging
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from travelpygame.util import (
 	fix_y_coord,
 	format_dataframe,
 	format_distance,
+	format_point,
 	geometry_to_file_async,
 	get_centroid,
 	get_closest_index,
@@ -40,20 +42,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _maybe_describe_point(point: shapely.Point, session: ClientSession | None):
+	if session is None:
+		return format_point(point)
+	return await describe_point(point, session, include_coords=True)
+
+
 async def print_furthest_point_from_poly(
-	points: PointSet, poly: 'BaseGeometry', session: ClientSession, name: str = 'polygon'
+	points: PointSet, poly: 'BaseGeometry', session: ClientSession | None, name: str = 'polygon'
 ):
 	furthest_point, dist = find_furthest_point(points.point_array, polygon=poly)
-	desc = await describe_point(furthest_point, session, include_coords=True)
+	desc = await _maybe_describe_point(furthest_point, session)
 	closest_index, _ = get_closest_index(furthest_point, points.point_array)
 	print(
 		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {points.points.index[closest_index]}'
 	)
 
 
-async def print_furthest_point(point_set: PointSet, initial: shapely.Point, session: ClientSession):
+async def print_furthest_point(
+	point_set: PointSet, initial: shapely.Point, session: ClientSession | None
+):
 	furthest_point, dist = find_furthest_point(point_set.point_array, initial)
-	desc = await describe_point(furthest_point, session, include_coords=True)
+	desc = await _maybe_describe_point(furthest_point, session)
 	closest_index, _ = get_closest_index(furthest_point, point_set.point_array)
 	print(
 		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {point_set.points.index[closest_index]}'
@@ -72,11 +82,12 @@ async def print_point(
 	point_set: PointSet,
 	point: shapely.Point,
 	name: str,
-	session: ClientSession,
+	session: ClientSession | None,
 	*,
 	get_median: bool = False,
 ):
-	print(f'{name}:', await describe_point(point, session, include_coords=True))
+	desc = await _maybe_describe_point(point, session)
+	print(f'{name}:', desc)
 	distances = point_set.get_all_distances(point)
 	if not point_set.contains(point):
 		dist = distances.iloc[0]
@@ -97,7 +108,7 @@ async def print_point(
 	print()
 
 
-async def print_average_points(point_set: PointSet, session: ClientSession):
+async def print_average_points(point_set: PointSet, session: ClientSession | None):
 	coords = point_set.coord_array
 
 	x, y = coords.T
@@ -122,7 +133,7 @@ async def print_average_points(point_set: PointSet, session: ClientSession):
 	await print_point(point_set, geo_median, 'Geometric median', session)
 
 
-async def print_extreme_points(point_set: PointSet, session: ClientSession):
+async def print_extreme_points(point_set: PointSet, session: ClientSession | None):
 	geo = point_set.points
 	west, south, east, north = geo.total_bounds
 
@@ -216,13 +227,6 @@ async def main() -> None:
 		help='Force a specific column label for the name of each point, otherwise autodetect',
 	)
 
-	argparser.add_argument(
-		'--projected-crs',
-		'--metric-crs',
-		'--metres-crs',
-		help='Projected coordinate reference system to use for some operations, autodetect if not specified',
-	)
-
 	output_args.add_argument(
 		'--uniqueness-path',
 		type=Path,
@@ -245,9 +249,21 @@ async def main() -> None:
 	)
 
 	argparser.add_argument(
+		'--projected-crs',
+		'--metric-crs',
+		'--metres-crs',
+		help='Projected coordinate reference system to use for some operations, autodetect if not specified',
+	)
+	argparser.add_argument(
 		'--polygon-path',
 		type=Path,
 		help='Optional path to a file containing polygons to get stats like furthest point in a region or whatever else',
+	)
+	argparser.add_argument(
+		'--reverse-geocode',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Reverse geocode when printing points, defaults to true.',
 	)
 
 	args = argparser.parse_args()
@@ -285,7 +301,8 @@ async def main() -> None:
 
 	print_unique_points(point_set, args.uniqueness_path)
 
-	async with ClientSession() as sesh:
+	use_reverse_geocode: bool = args.reverse_geocode
+	async with ClientSession() if use_reverse_geocode else nullcontext() as sesh:
 		await print_extreme_points(point_set, sesh)
 		await print_average_points(point_set, sesh)
 		await print_furthest_point(point_set, get_centroid(antipoints_mp), sesh)
