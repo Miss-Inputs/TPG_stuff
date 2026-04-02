@@ -17,10 +17,16 @@ from pyproj import Transformer
 from shapely import MultiPolygon, Point
 from tqdm.auto import tqdm
 from travelpygame import output_geodataframe, random_point_in_poly, random_points_in_poly
-from travelpygame.util import format_distance, format_point, get_polygons, read_geodataframe_async
+from travelpygame.util import (
+	format_distance,
+	format_point,
+	get_polygons,
+	read_geodataframe_async,
+	summarize_counter,
+)
 
 from lib.format_utils import describe_point
-from lib.stats import get_longest_distance_from_point, summarize_counter
+from lib.stats import get_longest_distance_from_point
 
 
 def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: list[str]):
