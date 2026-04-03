@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from argparse import ArgumentParser, BooleanOptionalAction
+from argparse import ZERO_OR_MORE, ArgumentParser, BooleanOptionalAction
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,16 +22,19 @@ from travelpygame.util import (
 	format_dataframe,
 	format_distance,
 	format_point,
-	geometry_to_file_async,
 	get_centroid,
 	get_closest_index,
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
 	get_polygons,
+)
+from travelpygame.util.io_utils import (
+	geometry_to_file_async,
 	output_dataframe,
 	output_geodataframe,
 	read_geodataframe_async,
 )
+from travelpygame.util.pandas_utils import detect_cat_cols
 
 from lib.format_utils import describe_point
 from lib.io_utils import load_point_set_from_arg
@@ -186,6 +189,23 @@ async def load_polygons(path: Path):
 	return shapely.MultiPolygon(polygons) if polygons else None
 
 
+def print_column_stats(point_set: PointSet, category_cols: list[str] | None, sep_char: str | None):
+	if not category_cols:
+		category_cols = detect_cat_cols(point_set.gdf)
+	if not category_cols:
+		print('Could not find any category columns in this point set')
+		return
+	for col_name in category_cols:
+		col = point_set.gdf[col_name]
+		if sep_char:
+			col = col.str.split(sep_char).explode()
+		counts = col.value_counts()
+		print(f'{col_name}: {counts.size} unique values')
+		percent = counts / counts.sum()
+		df = pandas.DataFrame({'count': counts, '%': percent})
+		print(format_dataframe(df, number_cols='count', percent_cols='%'))
+
+
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
@@ -265,6 +285,24 @@ async def main() -> None:
 		default=True,
 		help='Reverse geocode when printing points, defaults to true.',
 	)
+	argparser.add_argument(
+		'--column-stats',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Include additional stats about counts of columns, defaults to false. If --category-columns is not specified alongside this, they will be autodetected',
+	)
+	argparser.add_argument(
+		'--category-columns',
+		'--category-cols',
+		'--cat-cols',
+		nargs=ZERO_OR_MORE,
+		help='Columns to get counts of, implies --column-stats.',
+	)
+	argparser.add_argument(
+		'--split-categories',
+		default='/',
+		help='With --column-stats, split columns by this character (single slash / by default) to have multiple values in one column. Use empty string as an argument to disable',
+	)
 
 	args = argparser.parse_args()
 
@@ -298,6 +336,8 @@ async def main() -> None:
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
+	if args.column_stats or args.category_columns:
+		print_column_stats(point_set, args.category_columns, args.split_categories)
 
 	print_unique_points(point_set, args.uniqueness_path)
 
