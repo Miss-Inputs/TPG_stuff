@@ -125,12 +125,21 @@ async def _random_points_in_poly(
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
-	argparser.add_argument(
+
+	input_args = argparser.add_argument_group('Input args', 'Arguments specifying the input file')
+	gen_args = argparser.add_argument_group(
+		'Generation args', 'Control how locations are generated'
+	)
+	info_args = argparser.add_argument_group('Info args', 'Specify what is printed/outputted')
+	output_args = argparser.add_argument_group('Output args')
+
+	input_args.add_argument(
 		'path',
 		type=Path,
 		help='GeoJSON (or GeoPackage, etc) file to draw random point(s) from. Must contain polygons or multipolygons, for now',
 	)
-	argparser.add_argument(
+
+	gen_args.add_argument(
 		'-n',
 		'--num-points',
 		type=int,
@@ -138,27 +147,7 @@ async def main() -> None:
 		help='Number of points to generate, defaults to 1',
 		dest='n',
 	)
-	argparser.add_argument(
-		'--print-columns',
-		'--value-columns',
-		'--value-cols',
-		nargs='*',
-		help='Prints values of the random point(s) where they line up with rows in the input file, so you can use --value-columns state country to print the state and the country that each point is in, for example, if the file contains those columns. This will also be saved into --output-path if that is used.',
-		dest='value_cols',
-	)
-	argparser.add_argument(
-		'--stats',
-		action=BooleanOptionalAction,
-		default=False,
-		help='Display some info about the generated point if n == 1, or counts of things in the generated columns if n > 1',
-	)
-	argparser.add_argument(
-		'--reverse-geocode',
-		action=BooleanOptionalAction,
-		default=False,
-		help='Reverse geocode the address of each point if --value-cols is not specified, defaults to false',
-	)
-	argparser.add_argument(
+	gen_args.add_argument(
 		'--seed',
 		'--random-seed',
 		type=int,
@@ -166,10 +155,41 @@ async def main() -> None:
 		help='Optional seed for random number generator, default none (use default entropy)',
 		dest='seed',
 	)
-	argparser.add_argument(
+	gen_args.add_argument(
+		'--crs',
+		help='Temporarily project input file to a certain CRS before generating to see if that helps',
+	)
+
+	info_args.add_argument(
+		'--print-columns',
+		'--value-columns',
+		'--value-cols',
+		nargs='*',
+		help='Prints values of the random point(s) where they line up with rows in the input file, so you can use --value-columns state country to print the state and the country that each point is in, for example, if the file contains those columns. This will also be saved into --output-path if that is used.',
+		dest='value_cols',
+	)
+	info_args.add_argument(
+		'--stats',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Display some info about the generated point if n == 1, or counts of things in the generated columns if n > 1',
+	)
+	info_args.add_argument(
+		'--reverse-geocode',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Reverse geocode the address of each point if --value-cols is not specified, defaults to false',
+	)
+
+	output_args.add_argument(
 		'--output-path', type=Path, help='Output generated points here, if n is more than 1'
 	)
-	argparser.add_argument('--crs', help='Project to a CRS first to see if that helps')
+	output_args.add_argument(
+		'--print-all-points',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Print all points generated if n > 1 (otherwise does nothing as the single point will be printed anyway), defaults to false unless --output-path is not specified',
+	)
 	args = argparser.parse_args()
 
 	path = args.path
@@ -187,6 +207,8 @@ async def main() -> None:
 	else:
 		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
+	# TODO: Option to balance equally between each row in gdf (this probably goes in travelpygame)
+	# TODO: Argument to filter gdf by some column = value
 
 	if n == 1:
 		await _random_single_point_in_poly(
@@ -199,7 +221,7 @@ async def main() -> None:
 			to_wgs84,
 			value_cols,
 			seed,
-			print_each_point=output_path is None,
+			print_each_point=args.print_all_points or output_path is None,
 			stats=args.stats,
 			reverse_geocode=args.reverse_geocode,
 		)
