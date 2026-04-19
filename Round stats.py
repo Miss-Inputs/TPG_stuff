@@ -81,6 +81,8 @@ async def main() -> None:
 			centroid_raw = get_centroid(MultiPoint(points_raw), projected_crs)
 			centroid = get_centroid(MultiPoint(points), projected_crs)
 
+			n = len(r.submissions)
+			n_bonus = sum(bool(s.bonus_points) for s in r.submissions)
 			rows.append(
 				{
 					'Round': r.display_name,
@@ -88,6 +90,8 @@ async def main() -> None:
 					'Number of submissions within threshold': (distances <= world_distance).sum(),
 					'Average distance': avg_distance / 1_000,
 					'Raw average distance': avg_distance_raw / 1_000,
+					'# of submissions with bonus points': n_bonus,
+					'% of submissions with bonus points': n_bonus / n if n else None,
 					'Submission centroid lat': centroid.y,
 					'Submission centroid lng': centroid.x,
 					'Raw centroid lat': centroid_raw.y,
@@ -97,6 +101,10 @@ async def main() -> None:
 			)
 
 	df = pandas.DataFrame(rows).set_index('Round')
+	if (df['# of submissions with bonus points'].dropna() == 0).all():
+		df = df.drop(
+			columns=['# of submissions with bonus points', '% of submissions with bonus points']
+		)
 	print(df)
 	out_path = args.path.with_name(f'{args.path.stem} - Stats.csv')
 	await asyncio.to_thread(output_dataframe, df, out_path)
