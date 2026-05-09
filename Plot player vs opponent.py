@@ -226,12 +226,10 @@ async def main() -> None:
 	use_boxes: bool = args.use_boxes
 	bbox_arg: str | None = args.bbox
 	bbox: BboxType = None
-	if bbox_arg:
-		bbox = (
-			bbox_arg
-			if bbox_arg in {'max', 'min'}
-			else [float(part.strip()) for part in bbox_arg.split(',')]
-		)  # pyright: ignore[reportAssignmentType] #why.
+	if bbox_arg in {'max', 'min'}:
+		bbox = bbox_arg
+	elif bbox_arg:
+		bbox = [float(part.strip()) for part in bbox_arg.split(',')] 
 
 	grid = get_grid(
 		left_player, right_player, args.resolution, bbox, args.amount, use_boxes=use_boxes

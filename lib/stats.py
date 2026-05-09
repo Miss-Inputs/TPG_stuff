@@ -28,4 +28,5 @@ def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
 	idxmax = df['distance'].idxmax()
 	antipoint = df.loc[idxmax, 'point']
 	assert isinstance(antipoint, Point), type(antipoint)
-	return antipoint, float(df.loc[idxmax, 'distance'])  # type: ignore[arg-type]
+	max_dist = df.loc[idxmax, 'distance']
+	return antipoint, float(max_dist)

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Shows who was one place ahead of you in previous TPG rounds, and by how much. Attempts to figure out what point would be exactly as close from where you are, but that's a bit vague and doesn't always work."""
-
 import asyncio
 import logging
 import sys
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
+from typing import Any
 
 import pandas
 from geopandas import GeoDataFrame
@@ -38,7 +38,7 @@ def get_closest_placings(
 			# We won! That's certainly okay
 			continue
 
-		row = {
+		row: dict[str, Any] = {
 			'round': r.display_name,
 			'season': r.season,
 			'target': format_xy(r.longitude, r.latitude),
