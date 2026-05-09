@@ -1,5 +1,6 @@
 from itertools import combinations
 
+import numpy
 import pandas
 import shapely
 from shapely import MultiPolygon, Point, Polygon
@@ -27,6 +28,9 @@ def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
 	df = pandas.DataFrame(distances, columns=['point', 'distance'])
 	idxmax = df['distance'].idxmax()
 	antipoint = df.loc[idxmax, 'point']
-	assert isinstance(antipoint, Point), type(antipoint)
+	assert isinstance(antipoint, Point), f'antipoint is {type(antipoint)}, not Point'
 	max_dist = df.loc[idxmax, 'distance']
-	return antipoint, float(max_dist)
+	if isinstance(max_dist, numpy.floating):
+		max_dist = max_dist.item()
+	assert isinstance(max_dist, float), f'max_dist is {type(max_dist)}, not float'
+	return antipoint, max_dist
