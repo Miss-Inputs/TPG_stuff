@@ -26,18 +26,16 @@ from travelpygame.util import (
 	get_closest_index,
 	get_extreme_corners_of_point_set,
 	get_point_antipodes,
-	get_polygons,
 )
 from travelpygame.util.io_utils import (
 	geometry_to_file_async,
 	output_dataframe,
 	output_geodataframe,
-	read_geodataframe_async,
 )
 from travelpygame.util.pandas_utils import detect_cat_cols
 
 from lib.format_utils import describe_point
-from lib.io_utils import load_point_set_from_arg
+from lib.io_utils import load_point_set_from_arg, load_polygons
 
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
@@ -181,12 +179,6 @@ def print_unique_points(point_set: PointSet, uniqueness_path: Path | None):
 			('total_uniqueness', 'avg_uniqueness'),
 		)
 	)
-
-
-async def load_polygons(path: Path):
-	gdf = await read_geodataframe_async(path)
-	polygons = get_polygons(gdf)
-	return shapely.MultiPolygon(polygons) if polygons else None
 
 
 def print_column_stats(point_set: PointSet, category_cols: list[str] | None, sep_char: str | None):
@@ -348,7 +340,7 @@ async def main() -> None:
 		await print_furthest_point(point_set, get_centroid(antipoints_mp), sesh)
 		polygon_path: Path | None = args.polygon_path
 		if polygon_path:
-			polygon = await load_polygons(polygon_path)
+			polygon = await asyncio.to_thread(load_polygons, polygon_path)
 			if polygon:
 				await print_furthest_point_from_poly(point_set, polygon, sesh, polygon_path.stem)
 				await print_furthest_point_from_poly(

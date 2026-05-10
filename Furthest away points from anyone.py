@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING
 import geopandas
 import numpy
 import pandas
-from shapely import MultiPolygon, Polygon
 from tqdm.auto import tqdm
 from travelpygame import find_furthest_point, get_main_tpg_rounds_with_path, load_rounds
-from travelpygame.util import format_distance, format_point, output_geodataframe, read_geodataframe
+from travelpygame.util import format_distance, format_point, output_geodataframe
 
+from lib.io_utils import load_polygons
 from lib.settings import Settings
 
 if TYPE_CHECKING:
@@ -55,10 +55,8 @@ def main() -> None:
 		rounds = asyncio.run(get_main_tpg_rounds_with_path(settings.main_tpg_data_path))
 	threshold: float = args.threshold * 1_000
 	if args.within_region:
-		region_gdf = read_geodataframe(args.within_region)
-		region_gdf = region_gdf.to_crs('wgs84')
-		region = region_gdf.union_all()
-		if not isinstance(region, (Polygon, MultiPolygon)):
+		region = load_polygons(args.within_region)
+		if region is None:
 			raise TypeError(f'Nope, {args.within_region} contained something else')
 	else:
 		region = None

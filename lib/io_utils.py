@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas
+import shapely
 from async_lru import alru_cache
 from tqdm.auto import tqdm
 from travelpygame import (
@@ -16,7 +17,13 @@ from travelpygame import (
 	validate_points,
 )
 from travelpygame.tpg_data import PlayerName, PlayerUsername, get_player_username
-from travelpygame.util import format_point, maybe_set_index_name_col, try_auto_set_index
+from travelpygame.util import (
+	format_point,
+	get_polygons,
+	maybe_set_index_name_col,
+	read_geodataframe,
+	try_auto_set_index,
+)
 from travelpygame.util.io_utils import dataframe_exts, known_geo_exts, maybe_load_geodataframe
 
 from .settings import Settings
@@ -179,3 +186,11 @@ def load_point_sets_from_folder(
 					gdf = try_auto_set_index(gdf)
 					frames[child] = gdf
 	return [PointSet(gdf, path.stem) for path, gdf in frames.items()]
+
+
+def load_polygons(path: Path) -> shapely.Polygon | shapely.MultiPolygon | None:
+	gdf = read_geodataframe(path)
+	polygons = get_polygons(gdf)
+	if not polygons:
+		return None
+	return polygons[0] if len(polygons) == 1 else shapely.MultiPolygon(polygons)
