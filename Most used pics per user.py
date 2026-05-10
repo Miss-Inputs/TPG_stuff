@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""Gets the most frequently used locations of every player (who has submitted a location more than once, or some other configurable amount.).
-
-Currently, this only uses main TPG data.
-"""
+"""Gets the most frequently used locations of every player (who has submitted a location more than once, or some other configurable amount.)."""
 
 import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections import Counter, defaultdict
-from operator import itemgetter
 from pathlib import Path
 
 import geopandas
-from shapely import Point
-from tqdm.auto import tqdm
+from pandas import Series
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import get_main_tpg_rounds_with_path, load_rounds_async
+from travelpygame import load_or_fetch_submission_summary
 from travelpygame.util import output_geodataframe
 
 from lib.settings import Settings
@@ -26,13 +20,10 @@ async def main() -> None:
 	argparser.add_argument(
 		'--output-path',
 		type=Path,
-		help='Where to save submissions, can be .csv or .geojson/.gpkg/etc',
+		help='Where to save list of submissions, can be .csv or .geojson/.gpkg/etc',
 	)
 	argparser.add_argument(
-		'--data-path', type=Path, help='TPG data path, if not specified, will get main TPG data.'
-	)
-	argparser.add_argument(
-		'--include-ties',
+		'--ties',
 		action=BooleanOptionalAction,
 		default=True,
 		help="Include all pics that are a user's most submitted, as there can be ties. Defaults to true",
@@ -41,61 +32,56 @@ async def main() -> None:
 		'--threshold',
 		type=int,
 		default=2,
-		help='Only include pics from players who have submitted a pic at least this amount of times. Defaults to 2, setting it to 1 will include all kinds of one-off random pics and setting it to 0 or lower accomplishes nothing more than that',
+		help='Only include players who have submitted at least this amount of pics. Defaults to 2, setting it to 0 or lower is effectively disabling it',
+	)
+	argparser.add_argument(
+		'--usage-threshold',
+		type=int,
+		default=2,
+		help='Only include pics that have been submitted at least this number of times. Defaults to 2',
 	)
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
+	subs_path = Settings().subs_per_player_path
 
-	if args.data_path:
-		rounds = await load_rounds_async(args.data_path)
-	else:
-		settings = Settings()
-		rounds = await get_main_tpg_rounds_with_path(settings.main_tpg_data_path)
-
-	location_counts: defaultdict[str, list[Point]] = defaultdict(list)
-
-	for r in tqdm(rounds, 'Getting all submissions from all rounds', unit='round'):
-		for sub in r.submissions:
-			point = Point(sub.longitude, sub.latitude)
-			location_counts[sub.name].append(point)
+	subs = await load_or_fetch_submission_summary(subs_path)
 
 	rows = []
-	for name, subs in location_counts.items():
-		counts = Counter(subs)
-		most_common, most_common_count = max(counts.items(), key=itemgetter(1))
-		if most_common_count < args.threshold:
+	for name, group in subs.groupby('username'):
+		n_pics = group.index.size
+		if n_pics < args.threshold:
 			continue
-		rows.append(
-			{
-				'name': name,
-				'most_common': most_common,
-				'count': most_common_count,
-				'num_unique_locations': len(counts),
-			}
-		)
-		other_most_common = [
-			loc
-			for loc, count in counts.items()
-			if loc != most_common and count == most_common_count
-		]
-		if other_most_common:
-			if args.include_ties:
-				rows += [
+		if args.ties:
+			max_count = group['count'].max()
+			max_pics = group[group['count'] == max_count]
+			# Ideally, we want to add any other info that might be in the submission summary
+			for _, row in max_pics.iterrows():
+				rows.append(
 					{
-						'name': f'{name} {i}',
-						'most_common': loc,
-						'count': most_common_count,
-						'num_unique_locations': len(counts),
+						'player': row['player_name'],
+						'username': name,
+						'num_pics': n_pics,
+						'usage': max_count,
+						'geometry': row.geometry,
 					}
-					for i, loc in enumerate(other_most_common, 2)
-				]
-			else:
-				print(
-					f'{name} has ties for locations submitted {most_common_count} times (with {len(counts)} unique locations): {other_most_common}'
 				)
+		else:
+			idxmax = group['count'].idxmax()
+			most_common = group.loc[idxmax]
+			assert isinstance(most_common, Series), f'most_common is {type(most_common)}'
+			rows.append(
+				{
+					'player': group['player_name'].iloc[0],
+					'username': name,
+					'num_pics': n_pics,
+					'usage': most_common['count'],
+					'geometry': most_common.geometry,
+				}
+			)
 
-	gdf = geopandas.GeoDataFrame(rows, geometry='most_common', crs='wgs84')
-	gdf = gdf.sort_values('count', ascending=False)
+	gdf = geopandas.GeoDataFrame(rows, crs='wgs84')
+	gdf = gdf.sort_values(['usage', 'player'], ascending=[False, True])
+	gdf = gdf[gdf['usage'] >= args.usage_threshold]
 	print(gdf)
 	if output_path:
 		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
