@@ -220,8 +220,10 @@ async def main() -> None:
 
 	args = argparser.parse_args()
 
-	left_player = await load_point_set_from_arg(args.left_player, name_col=args.left_name_col)
-	right_player = await load_point_set_from_arg(args.right_player, name_col=args.right_name_col)
+	left_player = await load_point_set_from_arg(args.left_player, point_name_col=args.left_name_col)
+	right_player = await load_point_set_from_arg(
+		args.right_player, point_name_col=args.right_name_col
+	)
 
 	use_boxes: bool = args.use_boxes
 	bbox_arg: str | None = args.bbox
@@ -229,7 +231,7 @@ async def main() -> None:
 	if bbox_arg in {'max', 'min'}:
 		bbox = bbox_arg
 	elif bbox_arg:
-		bbox = [float(part.strip()) for part in bbox_arg.split(',')] 
+		bbox = [float(part.strip()) for part in bbox_arg.split(',')]
 
 	grid = get_grid(
 		left_player, right_player, args.resolution, bbox, args.amount, use_boxes=use_boxes

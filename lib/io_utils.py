@@ -9,12 +9,13 @@ from async_lru import alru_cache
 from tqdm.auto import tqdm
 from travelpygame import (
 	PointSet,
-	load_or_fetch_per_player_submissions,
+	get_all_point_sets,
+	load_or_fetch_submission_summary,
 	load_points,
 	load_points_async,
 	validate_points,
 )
-from travelpygame.tpg_data import PlayerUsername, get_player_username
+from travelpygame.tpg_data import PlayerName, PlayerUsername, get_player_username
 from travelpygame.util import format_point, maybe_set_index_name_col, try_auto_set_index
 from travelpygame.util.io_utils import dataframe_exts, known_geo_exts, maybe_load_geodataframe
 
@@ -37,55 +38,79 @@ def latest_file_matching_format_pattern(path: Path) -> Path:
 	return max(path.parent.glob(path.name.replace('{}', '*')))
 
 
-_load_subs_cached = alru_cache(1)(load_or_fetch_per_player_submissions)
+_load_sub_summary_cached = alru_cache(1)(load_or_fetch_submission_summary)
 
 
-async def _load_by_username(username: str):
-	settings = Settings()
-	all_subs = await _load_subs_cached(settings.subs_per_player_path, settings.main_tpg_data_path)
-	return all_subs[username]
+@alru_cache(maxsize=1)
+async def load_or_fetch_point_sets(path: Path | Settings | None = None) -> list[PointSet]:
+	if not isinstance(path, Path):
+		settings = path or Settings()
+		path = settings.subs_per_player_path
+	summary = await _load_sub_summary_cached(path)
+	return get_all_point_sets(summary)
 
 
-async def load_path_or_player(
-	path_or_name: str,
+# TODO: Ideally, there would be a load_or_fetch_point_sets using the display names as the point set names too
+# TODO: Ideally ideally, there would be a load by username/display name/Discord ID function that optionally just uses morphior_api.get_player_submissions
+
+
+async def _load_by_username(
+	settings_or_path: Path | Settings | None, username: PlayerUsername
+) -> PointSet:
+	for point_set in await load_or_fetch_point_sets(settings_or_path):
+		if point_set.name == username:
+			return point_set
+	raise KeyError(f'Username {username} not found')
+
+
+async def _load_by_display_name(
+	settings_or_path: Path | Settings | None, name: PlayerName
+) -> PointSet:
+	# TODO: Arguably better to just warn/error if name could refer to one or two usernames
+	username = await get_player_username(name)
+	if username is None:
+		raise KeyError(f'Player {name} not found')
+	return await _load_by_username(settings_or_path, username)
+
+
+# TODO: Load by Discord ID I guess
+
+
+async def load_point_set_from_path(
+	path: Path,
 	lat_col: str | None = None,
 	lng_col: str | None = None,
 	crs_arg: str | None = None,
-	name_col: str | None = None,
-	all_subs: 'dict[PlayerUsername, GeoDataFrame] | None' = None,
+	point_name_col: str | None = None,
+	projected_crs_arg: str | None = None,
+	name: str | None = None,
 	*,
 	force_unheadered: bool = False,
-) -> tuple[str, 'GeoDataFrame']:
-	if path_or_name.startswith('player:'):
-		name = player_name = path_or_name.removeprefix('player:')
-		username = await get_player_username(player_name)
-		if username is None:
-			raise KeyError(f'No player with display name {player_name} found')
-		gdf = await _load_by_username(username) if all_subs is None else all_subs[username]
-	elif path_or_name.startswith('username:'):
-		name = username = path_or_name.removeprefix('username:')
-		gdf = await _load_by_username(username) if all_subs is None else all_subs[username]
-	else:
-		path = Path(path_or_name)
-		name = path.stem
-		gdf = await load_points_async(
-			path,
-			lat_col,
-			lng_col,
-			crs=crs_arg or 'wgs84',
-			has_header=False if force_unheadered else None,
-		)
+):
+	"""Point set name will be set to the path stem if `name` is None"""
+	name = name or path.stem
+	gdf = await load_points_async(
+		path,
+		lat_col,
+		lng_col,
+		crs=crs_arg or 'wgs84',
+		has_header=False if force_unheadered else None,
+	)
 	assert gdf.crs, f'gdf {name} had no crs, which should never happen'
 	if not gdf.crs.is_geographic:
 		logger.warning('%s had non-geographic CRS %s, converting to WGS84', name, gdf.crs)
 		gdf = gdf.to_crs('wgs84')
 
-	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, path_or_name)
+	gdf, new_name_col = maybe_set_index_name_col(gdf, point_name_col, path)
 	if not new_name_col:
-		logger.info('%s had default index, formatting points', path_or_name)
+		# Should this always be what we want to do?
+		logger.info('%s had default index, formatting points', path)
 		gdf.index = pandas.Index(gdf.geometry.map(format_point), name='name')
-	_, to_drop = validate_points(gdf, name_for_log=path_or_name)
-	return name, gdf.drop(index=list(to_drop)) if to_drop else gdf
+
+	_, to_drop = validate_points(gdf, name_for_log=path)
+	if to_drop:
+		gdf = gdf.drop(index=list(to_drop))
+	return PointSet(gdf, name, projected_crs_arg)
 
 
 async def load_point_set_from_arg(
@@ -93,23 +118,28 @@ async def load_point_set_from_arg(
 	lat_col: str | None = None,
 	lng_col: str | None = None,
 	crs_arg: str | None = None,
-	name_col: str | None = None,
+	point_name_col: str | None = None,
 	projected_crs_arg: str | None = None,
-	all_subs: 'dict[PlayerUsername, GeoDataFrame]|None' = None,
+	settings_or_path: Path | Settings | None = None,
 	*,
 	force_unheadered: bool = False,
 ) -> PointSet:
-	name, gdf = await load_path_or_player(
-		path_or_name,
+	if path_or_name.startswith('player:'):
+		player_name = path_or_name.removeprefix('player:')
+		return await _load_by_display_name(settings_or_path, player_name)
+	if path_or_name.startswith('username:'):
+		username = path_or_name.removeprefix('username:')
+		return await _load_by_username(settings_or_path, username)
+	return await load_point_set_from_path(
+		Path(path_or_name),
 		lat_col,
 		lng_col,
 		crs_arg,
-		name_col,
-		all_subs,
+		point_name_col,
+		projected_crs_arg,
+		# could have another parameter for custom point set name but eh
 		force_unheadered=force_unheadered,
 	)
-
-	return PointSet(gdf, name, projected_crs_arg)
 
 
 def _listdir_sync(path: Path):

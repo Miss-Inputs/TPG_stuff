@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,12 +13,7 @@ import pandas
 import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import (
-	PointSet,
-	find_furthest_point,
-	load_or_fetch_per_player_submissions,
-	output_geodataframe,
-)
+from travelpygame import PointSet, find_furthest_point, output_geodataframe
 from travelpygame.tpg_api import get_session
 from travelpygame.tpg_data import get_player_display_names
 from travelpygame.util import (
@@ -30,7 +25,7 @@ from travelpygame.util import (
 	wgs84_geod,
 )
 
-from lib.settings import Settings
+from lib.io_utils import load_or_fetch_point_sets
 
 
 @dataclass
@@ -60,12 +55,17 @@ def get_concave_hull_info(point_set: PointSet):
 
 
 def get_stats(
-	point_sets: Collection[PointSet], *, get_concave_hulls: bool, find_furthest: bool
+	point_sets: Collection[PointSet],
+	player_names: Mapping[str, str],
+	*,
+	get_concave_hulls: bool,
+	find_furthest: bool,
 ) -> pandas.DataFrame:
 	data = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
 		for point_set in t:
-			t.set_postfix(name=point_set.name)
+			name = player_names.get(point_set.name, point_set.name)
+			t.set_postfix(name=name)
 			# TODO: These should all be parameters whether to calculate each particular stat or not
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
 
@@ -88,7 +88,7 @@ def get_stats(
 				row['antipoint'] = furthest_point
 				row['furthest_distance'] = furthest_distance
 
-			data[point_set.name] = row
+			data[name] = row
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
 
@@ -132,24 +132,19 @@ async def main() -> None:
 
 	args = argparser.parse_args()
 	path: Path | None = args.path
-	if not path:
-		settings = Settings()
-		path = settings.subs_per_player_path
+
 	threshold: int | None = args.threshold
 
 	async with get_session() as sesh:
 		# Maybe should use aliases, I dunno
-		subs = await load_or_fetch_per_player_submissions(path, session=sesh)
+		all_point_sets = await load_or_fetch_point_sets(path)
 		player_names = await get_player_display_names(sesh)
 
-	all_point_sets = [
-		PointSet(gdf, player_names.get(name, name))
-		for name, gdf in subs.items()
-		if threshold is None or gdf.index.size >= threshold
-	]
+	point_sets = [ps for ps in all_point_sets if threshold is None or ps.count >= threshold]
 
 	stats = get_stats(
-		all_point_sets,
+		point_sets,
+		player_names,
 		get_concave_hulls=args.find_concave_hulls,
 		find_furthest=args.find_furthest_points,
 	)

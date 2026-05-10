@@ -11,7 +11,7 @@ import contextily
 import geopandas
 import pandas
 from matplotlib import pyplot
-from travelpygame.subs_per_player import load_or_fetch_per_player_submissions
+from travelpygame import load_or_fetch_submission_summary
 from travelpygame.util import (
 	first_unique_column_label,
 	output_dataframe,
@@ -32,7 +32,7 @@ def get_players_by_region(
 	for i in range(regions.index.size):
 		players_by_region[i] = Counter()
 	for point_index, region_index in indices.T:
-		player = subs['player'].iloc[point_index]
+		player = subs['username'].iloc[point_index]
 		players_by_region[region_index.item()][player] += 1
 
 	rows = []
@@ -144,17 +144,8 @@ def main() -> None:
 	subs_path: Path | None = args.submissions_path
 	if not subs_path:
 		subs_path = Settings().subs_per_player_path
-	if not subs_path:
-		raise RuntimeError(
-			'--submissions-path was not set in the environment or provided explicitly'
-		)
 
-	subs_per_user = asyncio.run(load_or_fetch_per_player_submissions(subs_path))
-	# Awkwardly convert it back to a single DataFrame
-	subs = pandas.concat(
-		(points.assign(player=player) for player, points in subs_per_user.items()),
-		ignore_index=True,
-	)
+	subs = asyncio.run(load_or_fetch_submission_summary(subs_path))
 	assert isinstance(subs, geopandas.GeoDataFrame), f'subs was {type(subs)}'
 
 	gdf = get_players_by_region(regions, subs, name_col)

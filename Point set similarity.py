@@ -11,12 +11,12 @@ from collections.abc import Collection
 from operator import itemgetter
 from pathlib import Path
 from statistics import mean
+from typing import TYPE_CHECKING
 
 import pandas
 import pyproj
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import PointSet, load_or_fetch_per_player_submissions
 from travelpygame.point_set_stats import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
@@ -31,8 +31,10 @@ from travelpygame.util import (
 	to_graph,
 )
 
-from lib.io_utils import load_point_set_from_arg
-from lib.settings import Settings
+from lib.io_utils import load_or_fetch_point_sets, load_point_set_from_arg
+
+if TYPE_CHECKING:
+	from travelpygame import PointSet
 
 logger = logging.getLogger(Path(__file__).stem)
 
@@ -70,7 +72,7 @@ def _add_args(arg_group: ArgumentGroup, side: str):
 	)
 
 
-def compare_two(left: PointSet, right: PointSet, method: PointSetDistanceMethodType | None):
+def compare_two(left: 'PointSet', right: 'PointSet', method: PointSetDistanceMethodType | None):
 	if not method:
 		scores = {}
 		for i, meth in enumerate(PointSetDistanceMethod):
@@ -92,8 +94,8 @@ def compare_two(left: PointSet, right: PointSet, method: PointSetDistanceMethodT
 
 
 def compare_one_to_many(
-	left: PointSet,
-	point_sets: list[PointSet],
+	left: 'PointSet',
+	point_sets: list['PointSet'],
 	method: PointSetDistanceMethodType | None,
 	output_path: Path | None,
 ):
@@ -149,7 +151,7 @@ def compare_one_to_many(
 
 
 def compare_all(
-	point_sets: Collection[PointSet],
+	point_sets: Collection['PointSet'],
 	method: PointSetDistanceMethodType | None,
 	raw_output_path: Path | None,
 	output_path: Path | None,
@@ -202,12 +204,6 @@ def compare_all(
 
 
 async def load_data(args: Namespace):
-	subs_path = args.subs_path
-	if not subs_path:
-		settings = Settings()
-		subs_path = settings.subs_per_player_path
-
-	all_subs = await load_or_fetch_per_player_submissions(subs_path)
 	left_player = (
 		await load_point_set_from_arg(
 			args.left_player,
@@ -215,7 +211,7 @@ async def load_data(args: Namespace):
 			args.lng_col_left,
 			args.crs_left,
 			args.name_col_left,
-			all_subs=all_subs,
+			settings_or_path=args.subs_path,
 			force_unheadered=args.unheadered_left,
 		)
 		if args.left_player
@@ -230,7 +226,7 @@ async def load_data(args: Namespace):
 				args.lng_col_right,
 				args.crs_right,
 				args.name_col_right,
-				all_subs=all_subs,
+				settings_or_path=args.subs_path,
 				force_unheadered=args.unheadered_right,
 			)
 			for right_player in right_player_args
@@ -238,7 +234,7 @@ async def load_data(args: Namespace):
 	else:
 		right_players = []
 
-	all_point_sets = [PointSet(gdf, name) for name, gdf in all_subs.items()]
+	all_point_sets = await load_or_fetch_point_sets(args.subs_path)
 	skipped: set[str] = set(args.exclude_player or ())
 	threshold: int | None = args.threshold
 	all_point_sets = [
