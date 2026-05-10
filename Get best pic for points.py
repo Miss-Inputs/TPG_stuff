@@ -108,7 +108,7 @@ def main() -> None:
 	with tqdm(dests.iterrows(), 'Finding best pics', dests.index.size, unit='target') as t:
 		for index, dest_row in t:
 			dest = dest_row[dests.active_geometry_name]
-			name = dest_row[dest_name_col] if dest_name_col else f'{index}: {format_point(dest)}'  # pyright: ignore[reportArgumentType, reportCallIssue]
+			name = dest_row[dest_name_col] if dest_name_col else f'{index}: {format_point(dest)}'  # ty: ignore[invalid-argument-type]
 			t.set_postfix(target=name)
 			names[index] = name
 			best_pics[index], distances[index] = get_best_pic(

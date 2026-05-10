@@ -62,7 +62,7 @@ def get_distances(points: PointSet, new_points: geopandas.GeoDataFrame, *, use_h
 					'new_point': index,
 					'closest': closest,
 					'distance': distance,
-					'geometry': new_points.geometry.loc[index],  # pyright: ignore[reportArgumentType, reportCallIssue]]
+					'geometry': new_points.geometry.loc[index],  # ty: ignore[invalid-argument-type]
 				}
 			)
 	return geopandas.GeoDataFrame(rows, geometry='geometry', crs='wgs84').sort_values(

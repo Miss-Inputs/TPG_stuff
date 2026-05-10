@@ -17,7 +17,6 @@ from travelpygame import (
 	PointSet,
 	Round,
 	ScoringOptions,
-	load_or_fetch_per_player_submissions,
 	load_points,
 	load_rounds,
 	main_tpg_scoring,

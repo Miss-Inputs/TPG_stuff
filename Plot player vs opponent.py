@@ -229,7 +229,7 @@ async def main() -> None:
 	bbox_arg: str | None = args.bbox
 	bbox: BboxType = None
 	if bbox_arg in {'max', 'min'}:
-		bbox = bbox_arg
+		bbox = bbox_arg  # ty: ignore[invalid-assignment] #It should be narrowing to a literal, but isn't
 	elif bbox_arg:
 		bbox = [float(part.strip()) for part in bbox_arg.split(',')]
 

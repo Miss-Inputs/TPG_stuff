@@ -73,7 +73,7 @@ def plot_regions(gdf: geopandas.GeoDataFrame, output_path: Path | None, *, use_c
 		legend=True,
 		ax=ax,
 		linewidth=0.1,
-		edgecolor='black',
+		edgecolor='black',  # ty: ignore[invalid-argument-type] #eh?? str is very much allowed here
 		missing_kwds=None
 		if use_contextily
 		else {'color': 'lightgray', 'linewidth': 0, 'label': 'Unclaimed'},
