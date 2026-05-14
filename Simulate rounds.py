@@ -5,23 +5,15 @@ import asyncio
 import logging
 import re
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections.abc import Collection, Mapping
-from pathlib import Path
-from typing import TYPE_CHECKING
+from collections.abc import Collection
+from pathlib import Path, PurePath
 
 import shapely
-from aiohttp import ClientSession
 from pandas import DataFrame, Index, RangeIndex
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import (
-	PointSet,
-	Round,
-	ScoringOptions,
-	load_points,
-	load_rounds,
-	main_tpg_scoring,
-)
+from travelpygame import PointSet, validate_points
 from travelpygame.random_points import random_point_in_bbox, random_points_in_poly
+from travelpygame.scoring import main_tpg_scoring
 from travelpygame.simulation import (
 	SimulatedStrategy,
 	Simulation,
@@ -29,23 +21,28 @@ from travelpygame.simulation import (
 	get_player_summary,
 	get_round_summary,
 )
-from travelpygame.tpg_data import PlayerUsername, get_player_display_names, rounds_to_json
+from travelpygame.tpg_data import (
+	PlayerName,
+	Round,
+	ScoringOptions,
+	get_player_display_names,
+	load_rounds,
+	rounds_to_json,
+)
 from travelpygame.util import (
 	format_dataframe,
 	format_distance,
 	format_point,
 	format_xy,
+	load_points,
 	output_dataframe,
 	output_geodataframe,
 	read_geodataframe,
 	try_auto_set_index,
 )
 
-from lib.io_utils import load_point_sets_from_folder
+from lib.io_utils import load_or_fetch_point_sets, load_point_sets_from_folder
 from lib.settings import Settings
-
-if TYPE_CHECKING:
-	from geopandas import GeoDataFrame
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -94,11 +91,11 @@ def get_simulation(
 			rounds[round_name] = r.target
 			order[round_name] = r.number
 	elif targets_path:
-		targets = load_with_name(targets_path)
+		targets = load_with_auto_index(targets_path, None)
 		# Should we log about stuff that isn't a Point?
 		rounds = {
 			str(index): point
-			for index, point in targets.geometry.items()
+			for index, point in targets.points.items()
 			if isinstance(point, shapely.Point)
 		}
 	elif num_random_rounds:
@@ -155,8 +152,10 @@ def output_results(
 			output_geodataframe(losing, losing_rounds_path)
 
 
-def load_with_name(path: Path | str):
-	"""Loads points from `path` with names for each point. Might not be needed anymore."""
+def load_with_auto_index(path: PurePath | str, name: str | None) -> PointSet:
+	"""Loads points from `path` and automatically sets the index to something that looks like a name/description column."""
+	if isinstance(path, str):
+		path = PurePath(path)
 	points = load_points(path)
 	points = try_auto_set_index(points)
 	if isinstance(points.index, RangeIndex):
@@ -167,12 +166,15 @@ def load_with_name(path: Path | str):
 				for geo in points.geometry
 			]
 		)
-	return points
+	_, to_drop = validate_points(points, name_for_log=path)
+	if to_drop:
+		points = points.drop(index=list(to_drop))
+	return PointSet(points, name or path.stem)
 
 
 async def load_point_sets(
-	subs_per_user: Mapping[PlayerUsername, 'GeoDataFrame'] | None,
-	name: str | None,
+	point_sets_by_name: dict[PlayerName, PointSet] | None,
+	name: PlayerName | None,
 	points_path: Path | None,
 	threshold: int | None,
 	additional_folders: list[Path] | None,
@@ -180,34 +182,33 @@ async def load_point_sets(
 	*,
 	load_per_user: bool,
 ) -> list[PointSet]:
-	if load_per_user and not subs_per_user:
+	# TODO: This needs quite a bit of refactoring, seems we've been indecisive about what we're doing with it
+	# Like I'm not sure point_sets_by_name should be there because right now we're always just passing None, but maybe we were going to do something and now I don't know
+
+	point_sets_by_name = point_sets_by_name or {}
+	if load_per_user and not point_sets_by_name:
 		settings = Settings()
-		async with ClientSession() as sesh:
-			subs_per_user = await load_or_fetch_per_player_submissions(
-				settings.subs_per_player_path, session=sesh
-			)
-			player_names = await get_player_display_names(sesh)
+		all_point_sets = await load_or_fetch_point_sets(settings.subs_per_player_path)
+		player_names = await get_player_display_names()
+		for ps in all_point_sets:
+			ps.name = player_names.get(ps.name, ps.name)
+			point_sets_by_name[ps.name] = ps
 	else:
 		player_names = {}
-
-	gdf_per_user = (
-		{
-			player_names.get(player_username, player_username): player_pics
-			for player_username, player_pics in subs_per_user.items()
-			if threshold is None or player_pics.index.size >= threshold
-		}
-		if subs_per_user
-		else {}
-	)
 	if points_path:
 		if not name:
 			print(
 				'Warning: --points-path does not do anything without --name. You may want to use --add-player if these points are for a different player'
 			)
 		else:
-			# TODO: Probably we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			gdf_per_user[name] = await asyncio.to_thread(load_with_name, points_path)
-	point_sets = [PointSet(gdf, name) for name, gdf in gdf_per_user.items()]
+			# TODO: Perchance we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
+			point_sets_by_name[name] = await asyncio.to_thread(
+				load_with_auto_index, points_path, name
+			)
+
+	point_sets = [
+		ps for ps in point_sets_by_name.values() if threshold is None or ps.count >= threshold
+	]
 
 	if additional_folders:
 		for folder in additional_folders:
@@ -215,8 +216,8 @@ async def load_point_sets(
 
 	if additional_players_args:
 		for additional_name, path in additional_players_args:
-			points = await asyncio.to_thread(load_with_name, path)
-			point_sets.append(PointSet(points, additional_name))
+			point_set = await asyncio.to_thread(load_with_auto_index, path, additional_name)
+			point_sets.append(point_set)
 
 	if not point_sets:
 		raise RuntimeError('Nobody is able to be simulated')
@@ -230,7 +231,7 @@ def parse_coords(s: str) -> shapely.Point | None:
 	return shapely.Point(lng, lat)
 
 
-def simulate_single_round(sim: Simulation, output_path: Path | None):
+def simulate_single_round(sim: Simulation, output_path: Path | None, name: str | None):
 	round_name, target = next(iter(sim.rounds.items()))
 	result = sim.simulate_round(round_name, 1, target)
 	rows = [sub.model_dump(exclude_none=True) for sub in result.submissions]
@@ -240,6 +241,9 @@ def simulate_single_round(sim: Simulation, output_path: Path | None):
 	median_distance = df['distance'].median()
 	print('Median distance:', format_distance(median_distance))
 	print(format_dataframe(df, distance_cols=('distance')))
+	if name:
+		print(df[df['name'] == name].squeeze())
+
 	if output_path:
 		output_dataframe(df, output_path)
 
@@ -432,7 +436,7 @@ def main() -> None:
 		name = None
 
 	if len(simulation.rounds) == 1:
-		simulate_single_round(simulation, args.player_summary_path)
+		simulate_single_round(simulation, args.player_summary_path, name)
 		return
 
 	new_rounds = simulation.simulate_rounds()

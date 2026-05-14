@@ -57,7 +57,6 @@ async def load_or_fetch_point_sets(path: Path | Settings | None = None) -> list[
 	return get_all_point_sets(summary)
 
 
-# TODO: Ideally, there would be a load_or_fetch_point_sets using the display names as the point set names too
 # TODO: Ideally ideally, there would be a load by username/display name/Discord ID function that optionally just uses morphior_api.get_player_submissions
 
 
