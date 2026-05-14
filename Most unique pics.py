@@ -14,8 +14,8 @@ from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.submission_data import load_or_fetch_submission_summary
-from travelpygame.util import output_geodataframe
 from travelpygame.util.distance import cartesian_product_distances
+from travelpygame.util.io_utils import output_geodataframe
 
 from lib.settings import Settings
 

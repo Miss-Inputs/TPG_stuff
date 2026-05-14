@@ -11,7 +11,7 @@ from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
 from travelpygame import PointSet, get_best_pic
-from travelpygame.util import format_distance
+from travelpygame.util.formatting import format_distance
 from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
 
 from lib.io_utils import load_point_set_from_arg

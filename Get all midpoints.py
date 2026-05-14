@@ -13,8 +13,7 @@ import geopandas
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.util import geod_distance, output_geodataframe
-from travelpygame.util.geo_utils import get_midpoint, get_midpoint_centre
+from travelpygame.util import geod_distance, get_midpoint, get_midpoint_centre, output_geodataframe
 
 from lib.io_utils import load_point_set_from_arg
 

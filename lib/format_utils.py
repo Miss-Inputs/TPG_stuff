@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pandas
 import pycountry
 from travelpygame.reverse_geocode import get_address_nominatim
-from travelpygame.util.other import format_xy
+from travelpygame.util.formatting import format_xy
 
 if TYPE_CHECKING:
 	from aiohttp import ClientSession
