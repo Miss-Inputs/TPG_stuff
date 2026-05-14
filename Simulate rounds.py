@@ -188,7 +188,7 @@ async def load_point_sets(
 	point_sets_by_name = point_sets_by_name or {}
 	if load_per_user and not point_sets_by_name:
 		settings = Settings()
-		all_point_sets = await load_or_fetch_point_sets(settings.subs_per_player_path)
+		all_point_sets = await load_or_fetch_point_sets(settings.all_subs_path)
 		player_names = await get_player_display_names()
 		for ps in all_point_sets:
 			ps.name = player_names.get(ps.name, ps.name)
@@ -375,7 +375,7 @@ def main() -> None:
 		metavar=('name', 'point_set_path'),
 		help='Add a new player with a name and points from a file (pair of arguments in that order, can be specified multiple times)',
 	)
-	# Everything should be optional here, and subs_per_user and targets should be completely separate, but by default load the former as usual and use main TPG data for the latter but have options to not do that, just throw an error if we end up with no players or no points
+	# Everything should be optional here, and all_subs_path and targets should be completely separate, but by default load the former as usual and use main TPG data for the latter but have options to not do that, just throw an error if we end up with no players or no points
 	# TODO: Grid of points for target
 	# TODO: Option to also try with a new_points point set, and see how it compares, and what pics would improve your ranking etc
 	args = argparser.parse_args()

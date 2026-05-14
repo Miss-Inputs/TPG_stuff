@@ -143,7 +143,7 @@ def main() -> None:
 
 	subs_path: Path | None = args.submissions_path
 	if not subs_path:
-		subs_path = Settings().subs_per_player_path
+		subs_path = Settings().all_subs_path
 
 	subs = asyncio.run(load_or_fetch_submission_summary(subs_path))
 	assert isinstance(subs, geopandas.GeoDataFrame), f'subs was {type(subs)}'

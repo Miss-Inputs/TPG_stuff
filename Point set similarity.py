@@ -273,7 +273,7 @@ def main() -> None:
 		'--subs-path',
 		'--submissions-path',
 		type=Path,
-		help='Path to file to load submissions per player from (can be a TPG data file), or the value of the SUBS_PER_USER_PATH by default. If not set, loads from API',
+		help='Path to file to load submissions per player from (can be a TPG data file), or the value of the ALL_SUBS_PATH by default. If not set, loads from API',
 	)
 	argparser.add_argument('--exclude-player', nargs='*', help='Exclude player(s) by username')
 	argparser.add_argument(

@@ -42,7 +42,7 @@ async def main() -> None:
 	)
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
-	subs_path = Settings().subs_per_player_path
+	subs_path = Settings().all_subs_path
 
 	subs = await load_or_fetch_submission_summary(subs_path)
 

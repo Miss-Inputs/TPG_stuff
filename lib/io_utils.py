@@ -52,7 +52,7 @@ _load_sub_summary_cached = alru_cache(1)(load_or_fetch_submission_summary)
 async def load_or_fetch_point_sets(path: Path | Settings | None = None) -> list[PointSet]:
 	if not isinstance(path, Path):
 		settings = path or Settings()
-		path = settings.subs_per_player_path
+		path = settings.all_subs_path
 	summary = await _load_sub_summary_cached(path)
 	return get_all_point_sets(summary)
 

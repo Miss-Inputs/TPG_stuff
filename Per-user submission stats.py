@@ -106,7 +106,7 @@ async def main() -> None:
 		'path',
 		nargs='?',
 		type=Path,
-		help='Path to load submissions from, if this is not specified will try the SUBS_PER_PLAYER_PATH environment variable if set.',
+		help='Path to load submissions from, if this is not specified will try the ALL_SUBS_PATH environment variable if set.',
 	)
 	argparser.add_argument(
 		'--threshold',
