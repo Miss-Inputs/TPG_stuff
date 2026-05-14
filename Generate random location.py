@@ -123,6 +123,20 @@ async def _random_points_in_poly(
 	return geopandas.GeoDataFrame(rows, geometry='point', crs='wgs84')
 
 
+def filter_gdf(
+	gdf: geopandas.GeoDataFrame,
+	include_args: list[list[str]] | None,
+	exclude_args: list[list[str]] | None,
+) -> geopandas.GeoDataFrame:
+	if include_args:
+		for field, value in include_args:
+			gdf = gdf[gdf[field] == value]
+	if exclude_args:
+		for field, value in exclude_args:
+			gdf = gdf[gdf[field] != value]
+	return gdf
+
+
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 
@@ -137,6 +151,20 @@ async def main() -> None:
 		'path',
 		type=Path,
 		help='GeoJSON (or GeoPackage, etc) file to draw random point(s) from. Must contain polygons or multipolygons, for now',
+	)
+	input_args.add_argument(
+		'--filter',
+		action='append',
+		nargs=2,
+		metavar=('field', 'value'),
+		help='Filters the input to only rows matching a certain value, as (field name) == (value). Multiple pairs of field/value can be specified multiple times to restrict to rows matching _all_ filters',
+	)
+	input_args.add_argument(
+		'--exclude',
+		action='append',
+		nargs=2,
+		metavar=('field', 'value'),
+		help='Filters the input to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
 	)
 
 	gen_args.add_argument(
@@ -199,6 +227,9 @@ async def main() -> None:
 	value_cols: list[str] = args.value_cols
 
 	gdf = await read_geodataframe_async(path)
+	gdf = filter_gdf(gdf, args.filter, args.exclude)
+	if gdf.empty:
+		raise RuntimeError('You have filtered out everything!')
 	if args.crs:
 		gdf = gdf.to_crs(args.crs)
 
@@ -208,7 +239,6 @@ async def main() -> None:
 		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
 	# TODO: Option to balance equally between each row in gdf (this probably goes in travelpygame)
-	# TODO: Argument to filter gdf by some column = value
 
 	if n == 1:
 		await _random_single_point_in_poly(
