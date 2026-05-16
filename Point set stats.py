@@ -6,30 +6,15 @@ import logging
 from argparse import ZERO_OR_MORE, ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
 from contextlib import nullcontext
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import geopandas
-import numpy
 import pandas
-import shapely
 from aiohttp import ClientSession
-from travelpygame.point_set_stats import find_furthest_point, find_geometric_median
-from travelpygame.util import (
-	circular_mean_xy,
-	fix_x_coord,
-	fix_y_coord,
-	format_area,
-	get_area,
-	get_geometry_antipode,
-	get_point_antipodes,
-)
-from travelpygame.util.distance import (
-	cartesian_product_distances,
-	geod_distance,
-	self_cartesian_product_distances,
-)
+from travelpygame.point_set_stats import PointSetStats, find_furthest_point, get_point_set_stats
+from travelpygame.util import format_area, get_point_antipodes
+from travelpygame.util.distance import self_cartesian_product_distances
 from travelpygame.util.formatting import (
 	format_dataframe,
 	format_distance,
@@ -43,13 +28,14 @@ from lib.format_utils import describe_point
 from lib.io_utils import load_point_set_from_arg, load_polygons
 
 if TYPE_CHECKING:
+	from shapely import Point
 	from shapely.geometry.base import BaseGeometry
 	from travelpygame.point_set import PointSet
 
 logger = logging.getLogger(__name__)
 
 
-async def _maybe_describe_point(point: shapely.Point, session: ClientSession | None):
+async def _maybe_describe_point(point: 'Point', session: ClientSession | None):
 	if session is None:
 		return format_point(point)
 	return await describe_point(point, session, include_coords=True)
@@ -57,7 +43,7 @@ async def _maybe_describe_point(point: shapely.Point, session: ClientSession | N
 
 async def print_point(
 	point_set: 'PointSet',
-	point: shapely.Point,
+	point: 'Point',
 	name: str,
 	session: ClientSession | None,
 	*,
@@ -83,175 +69,6 @@ async def print_point(
 		)
 
 	print()
-
-
-@dataclass
-class PointSetStats:
-	# centres
-	circular_mean: shapely.Point
-	arithmetic_mean: shapely.Point
-	"""Just the mean of all the lat/lng coordinates"""
-	arithmetic_median: shapely.Point
-	closest_to_bbox: shapely.Point
-	raw_centroid: shapely.Point
-	"""Computed using normal geometric CRS, so technically wrong and assumes flat earth"""
-	centroid: shapely.Point
-	"""Computed using projected CRS"""
-	centre_of_extremes: shapely.Point
-	geometric_median: shapely.Point | None
-	"""Optional since it can take some time to compute"""
-	antipoint: shapely.Point | None
-	"""Furthest possible point from anywhere on earth, optional since it can take some time to compute"""
-
-	# extreme points
-	# Maybe some of these shouldn't be tuples and should instead be separated into two attributes
-	westmost: tuple[float, list[Hashable]]
-	"""(longitude, list of indexes at this longitude). Assumes the earth is flat and that -180 longitude is the edge of the planet, because WGS84"""
-	eastmost: tuple[float, list[Hashable]]
-	"""(longitude, list of indexes at this longitude). Assumes the earth is flat and that 180 longitude is the edge of the planet, because WGS84"""
-	northmost: tuple[float, list[Hashable]]
-	"""(latitude, list of indexes at this latitude)"""
-	southmost: tuple[float, list[Hashable]]
-	"""(latitude, list of indexes at this latitude)"""
-	nw_most: tuple[float, Hashable]
-	"""(distance, index closest to corner)"""
-	ne_most: tuple[float, Hashable]
-	"""(distance, index closest to corner)"""
-	sw_most: tuple[float, Hashable]
-	"""(distance, index closest to corner)"""
-	se_most: tuple[float, Hashable]
-	"""(distance, index closest to corner)"""
-	antipoint_closest: Hashable | None
-
-	# Distances in metres that might be a good measure of the extent of one's travels
-	diagonal_dist: float
-	total_dist_from_centroid: float
-	max_dist_from_centroid: float
-	antipoint_dist: float | None
-	"""Distance from any point in the point set to the antipoint, so smaller numbers indicate more well-travelled (can cover own deadzones better). Optional since the antipoint can take some time to compute"""
-	# Other measures of extent
-	convex_hull_area: float
-	concave_hull_area: float
-	bbox_area: float
-
-	# Other stuff
-	closest_to_bbox_label: Hashable
-	closest_to_bbox_dist: float
-
-	@property
-	def centres(self) -> dict[str, shapely.Point]:
-		d = {
-			'Circular mean point': self.circular_mean,
-			'Mean point': self.arithmetic_mean,
-			'Median point': self.arithmetic_median,
-			'Closest point to bounding box corners': self.closest_to_bbox,
-			'Centroid': self.raw_centroid,
-			'Centroid (projected)': self.centroid,
-			'Centre of extremes': self.centre_of_extremes,
-		}
-		if self.geometric_median is not None:
-			d['Geometric median'] = self.geometric_median
-		return d
-
-	@property
-	def distance_extents(self) -> dict[str, float]:
-		return {
-			'Diagonal distance of bounding box': self.diagonal_dist,
-			'Total distance from centroid': self.total_dist_from_centroid,
-			'Maximum distance from centroid': self.max_dist_from_centroid,
-		}
-
-	@property
-	def area_extents(self) -> dict[str, float]:
-		return {
-			'Bounding box area': self.bbox_area,
-			'Convex hull area': self.convex_hull_area,
-			'Concave hull area': self.concave_hull_area,
-		}
-
-
-def get_point_set_stats(point_set: 'PointSet', *, find_geomedian: bool, find_antipoint: bool):
-	geo = point_set.points
-	coords = shapely.get_coordinates(geo)
-	west, south, east, north = geo.total_bounds
-	sw = shapely.Point(west, south)
-	se = shapely.Point(east, south)
-	nw = shapely.Point(west, north)
-	ne = shapely.Point(east, north)
-	bbox = shapely.box(west, south, east, north)
-	x, y = coords.T
-	d = dict(point_set.items())
-
-	westmost = geo[geo.x == west].index.tolist()
-	eastmost = geo[geo.x == east].index.tolist()
-	northmost = geo[geo.y == north].index.tolist()
-	southmost = geo[geo.y == south].index.tolist()
-
-	centre_x = fix_x_coord((west + east) / 2)
-	centre_y = fix_y_coord((south + north) / 2)
-	centre_of_extremes = shapely.Point(centre_x, centre_y)
-	circ_mean_x, circ_mean_y = circular_mean_xy(x, y)
-	circ_mean = shapely.Point(circ_mean_x, circ_mean_y)
-	mean = shapely.Point(fix_x_coord(x.mean()), fix_y_coord(y.mean()))
-	median_coords = numpy.median(coords, axis=0)
-	median = shapely.Point(fix_x_coord(median_coords[0]), fix_y_coord(median_coords[1]))
-
-	bbox_dists = cartesian_product_distances(
-		geo, geopandas.GeoSeries([sw, se, nw, ne], index=['sw', 'se', 'nw', 'ne'])
-	)
-	total_bbox_dists = bbox_dists.sum(axis='columns')
-	closest_index_to_corners = total_bbox_dists.idxmax()
-	closest_to_bbox_dist = total_bbox_dists.loc[closest_index_to_corners]
-	closest_to_corners = d[closest_index_to_corners]
-	nwmost, nw_dist = point_set.get_closest_index(nw)
-	nemost, ne_dist = point_set.get_closest_index(ne)
-	swmost, sw_dist = point_set.get_closest_index(sw)
-	semost, se_dist = point_set.get_closest_index(se)
-	diagonal_dist = geod_distance(sw, ne)
-
-	raw_centroid = shapely.centroid(point_set.multipoint)
-	centroid = point_set.centroid
-	centroid_distances = point_set.get_all_distances(centroid)
-	total_centroid_dist = centroid_distances.sum()
-	max_centroid_dist = centroid_distances.max()
-
-	if find_antipoint:
-		initial = get_geometry_antipode(circ_mean)
-		antipoint, antipoint_dist = find_furthest_point(geo, initial)
-		antipoint_closest, _ = point_set.get_closest_index(antipoint)
-	else:
-		antipoint = antipoint_dist = antipoint_closest = None
-	geo_median = find_geometric_median(geo, centroid) if find_geomedian else None
-
-	return PointSetStats(
-		circ_mean,
-		mean,
-		median,
-		closest_to_corners,
-		raw_centroid,
-		centroid,
-		centre_of_extremes,
-		geo_median,
-		antipoint,
-		(west, westmost),
-		(east, eastmost),
-		(north, northmost),
-		(south, southmost),
-		(nw_dist, nwmost),
-		(ne_dist, nemost),
-		(sw_dist, swmost),
-		(se_dist, semost),
-		antipoint_closest,
-		diagonal_dist,
-		total_centroid_dist,
-		max_centroid_dist,
-		antipoint_dist,
-		get_area(point_set.convex_hull),
-		get_area(point_set.concave_hull),
-		get_area(bbox),
-		closest_index_to_corners,
-		closest_to_bbox_dist,
-	)
 
 
 async def print_centre_points(
@@ -303,7 +120,8 @@ def print_extents(stats: PointSetStats):
 
 
 def print_unique_points(point_set: 'PointSet', uniqueness_path: Path | None):
-	# TODO: Calculation and printing should be separated
+	# TODO: Calculation and printing should be separated (the former should go in travelpygame)
+	# Just not sure if we want anything here to be another property on PointSetStats… we probably do, right
 	distances = pandas.DataFrame(self_cartesian_product_distances(point_set.points))
 	closest = distances.idxmin(axis='columns')
 	uniqueness = distances.min(axis='columns')
@@ -316,24 +134,30 @@ def print_unique_points(point_set: 'PointSet', uniqueness_path: Path | None):
 			'closest': closest,
 			'uniqueness': uniqueness,
 			'furthest': furthest,
-			'furthest_dist': furthest_dist,
+			'eccentricity': furthest_dist,
 			'total_uniqueness': total_uniqueness,
 			'mean_uniqueness': total_uniqueness / (point_set.count - 1),
 		}
 	)
 	df = df.sort_values('mean_uniqueness', ascending=False)
-	if uniqueness_path:
-		output_dataframe(df, uniqueness_path)
-	print(
-		format_dataframe(df, ['uniqueness', 'furthest_dist', 'total_uniqueness', 'mean_uniqueness'])
-	)
+	radius = df['eccentricity'].min()
+	centres = df[df['eccentricity'] == radius].index
+	print(f'Radius: {format_distance(radius)}, centre(s): {centres.tolist()}')
+
 	stacked = distances.stack()
 	assert isinstance(stacked, pandas.Series), f'stacked is {type(stacked)}'
 	assert not isinstance(stacked, pandas.DataFrame), 'why'
 	index_from, index_to = stacked.idxmax()  # ty:ignore[not-iterable] #It is iterable because stacked has a MultiIndex
-	max_dist = stacked.max()
+	diameter = stacked.max()
+
 	print(
-		f'Maximum distance between any two points: {index_from} to {index_to}, {format_distance(max_dist)}'
+		f'Maximum distance between any two points: {index_from} to {index_to}, {format_distance(diameter)}'
+	)
+
+	if uniqueness_path:
+		output_dataframe(df, uniqueness_path)
+	print(
+		format_dataframe(df, ['uniqueness', 'eccentricity', 'total_uniqueness', 'mean_uniqueness'])
 	)
 
 
