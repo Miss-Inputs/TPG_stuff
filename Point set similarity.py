@@ -17,7 +17,7 @@ import pandas
 import pyproj
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.point_set_stats import (
+from travelpygame.point_set_stats.similarity import (
 	PointSetDistanceMethod,
 	PointSetDistanceMethodType,
 	get_distance_method_combinations,

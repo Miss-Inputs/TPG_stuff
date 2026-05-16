@@ -12,7 +12,8 @@ import geopandas
 import numpy
 import pandas
 from tqdm.auto import tqdm
-from travelpygame import find_furthest_point, get_main_tpg_rounds_with_path, load_rounds
+from travelpygame import get_main_tpg_rounds_with_path, load_rounds
+from travelpygame.point_set_stats import find_furthest_point
 from travelpygame.util import format_distance, format_point, output_geodataframe
 
 from lib.io_utils import load_polygons

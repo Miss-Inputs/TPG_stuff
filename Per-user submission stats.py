@@ -7,14 +7,14 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import geopandas
 import pandas
 import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import PointSet, find_furthest_point, output_geodataframe
+from travelpygame.point_set_stats import find_furthest_point
 from travelpygame.tpg_api import get_session
 from travelpygame.tpg_data import get_player_display_names
 from travelpygame.util import (
@@ -23,10 +23,14 @@ from travelpygame.util import (
 	format_point,
 	geod_distance,
 	get_geometry_antipode,
+	output_geodataframe,
 	wgs84_geod,
 )
 
 from lib.io_utils import load_or_fetch_point_sets
+
+if TYPE_CHECKING:
+	from travelpygame.point_set import PointSet
 
 
 @dataclass
@@ -36,7 +40,7 @@ class HullInfo:
 	perimeter: float
 
 
-def get_concave_hull_info(point_set: PointSet):
+def get_concave_hull_info(point_set: 'PointSet'):
 	if point_set.count == 1:
 		return HullInfo(None, 0, 0)
 	if point_set.count == 2:
@@ -56,7 +60,7 @@ def get_concave_hull_info(point_set: PointSet):
 
 
 def get_stats(
-	point_sets: Collection[PointSet],
+	point_sets: Collection['PointSet'],
 	player_names: Mapping[str, str],
 	*,
 	get_concave_hulls: bool,
