@@ -1,8 +1,8 @@
 import asyncio
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas
 import shapely
@@ -46,6 +46,15 @@ def latest_file_matching_format_pattern(path: Path) -> Path:
 
 
 load_sub_summary_cached = alru_cache(1)(load_or_fetch_submission_summary)
+
+
+def set_name_col(gdf: 'GeoDataFrame', name_col: Hashable | None, log_context: Any = None):
+	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, log_context)
+	if not new_name_col:
+		# Should this always be what we want to do?
+		logger.info('%s had default index, formatting points', log_context)
+		gdf.index = pandas.Index(gdf.geometry.map(format_point), name='name')
+	return gdf
 
 
 @alru_cache(maxsize=1)
@@ -107,11 +116,7 @@ async def load_point_set_from_path(
 		logger.warning('%s had non-geographic CRS %s, converting to WGS84', name, gdf.crs)
 		gdf = gdf.to_crs('wgs84')
 
-	gdf, new_name_col = maybe_set_index_name_col(gdf, point_name_col, path)
-	if not new_name_col:
-		# Should this always be what we want to do?
-		logger.info('%s had default index, formatting points', path)
-		gdf.index = pandas.Index(gdf.geometry.map(format_point), name='name')
+	gdf = set_name_col(gdf, point_name_col, path)
 
 	_, to_drop = validate_points(gdf, name_for_log=path)
 	if to_drop:

@@ -4,20 +4,23 @@ import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import contextily
 import geopandas
 from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
-from travelpygame import PointSet, get_best_pic
 from travelpygame.util.formatting import format_distance
 from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
 
 from lib.io_utils import load_point_set_from_arg
 
+if TYPE_CHECKING:
+	from travelpygame.point_set import PointSet
 
-def get_grid(point_set: PointSet, resolution: float, *, use_boxes: bool, limit_to_bbox: bool):
+
+def get_grid(point_set: 'PointSet', resolution: float, *, use_boxes: bool, limit_to_bbox: bool):
 	if limit_to_bbox:
 		min_x, min_y, max_x, max_y = point_set.gdf.total_bounds
 	else:
@@ -155,7 +158,9 @@ def main() -> None:
 			point = geom if isinstance(geom, Point) else geom.representative_point()
 			# This seems wrong, since we already know it's a box and what it is and we should get the exact middle of the box, maybe? But representative_point seems to return that for rectangles already
 			t.set_postfix(index=index, point=point)
-			best_pic, distance = get_best_pic(point_set, point, use_haversine=args.use_haversine)
+			best_pic, distance = point_set.get_closest_index(
+				point, use_haversine=args.use_haversine
+			)
 			distances[index] = distance
 			best_pics[index] = best_pic
 

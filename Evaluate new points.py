@@ -33,7 +33,6 @@ from travelpygame.util import (
 	format_distance,
 	format_ordinal,
 	format_point,
-	get_closest_index,
 	maybe_set_index_name_col,
 	output_dataframe,
 	output_geodataframe,
@@ -53,14 +52,13 @@ def get_distances(points: PointSet, new_points: geopandas.GeoDataFrame, *, use_h
 				raise TypeError(
 					f'new points contained {type(new_point)} at {index} instead of Point'
 				)
-			closest_index, distance = get_closest_index(
-				new_point, points.point_array, use_haversine=use_haversine
+			closest_index, distance = points.get_closest_index(
+				new_point, use_haversine=use_haversine
 			)
-			closest = points.points.index[closest_index]
 			rows.append(
 				{
 					'new_point': index,
-					'closest': closest,
+					'closest': closest_index,
 					'distance': distance,
 					'geometry': new_points.geometry.loc[index],  # ty: ignore[invalid-argument-type]
 				}
@@ -185,12 +183,12 @@ async def eval_with_rounds(
 		distance = None
 		current_best = _get_point_name(current_points, current_diff)
 
-		current_best_index, current_distance = get_closest_index(
-			r.target, current_points.point_array, use_haversine=use_haversine
+		current_best_index, current_distance = current_points.get_closest_index(
+			r.target, use_haversine=use_haversine
 		)
 		if current_distance < current_diff.player_distance:
 			old_best = current_best
-			current_best: str = current_points.points.index[current_best_index]
+			current_best = current_best_index
 			print(
 				f'Round {r.display_name} would already be improved by {current_best} over {old_best}: {format_distance(current_distance)} < {format_distance(current_diff.player_distance)}'
 			)
@@ -207,7 +205,7 @@ async def eval_with_rounds(
 				# Unless we just won the round
 				if new_rank == 1:
 					continue
-				new_current_point = current_points.points[current_best]
+				new_current_point = current_points.points[current_best]  # ty:ignore[invalid-argument-type] #indexer should support Hashable
 				assert isinstance(new_current_point, Point), (
 					f'new_current_point was {type(new_current_point)}, expected Point, this should not be loaded that way'
 				)
@@ -217,7 +215,7 @@ async def eval_with_rounds(
 					new_current_point,
 					current_distance,
 					new_rank,
-					current_best,
+					str(current_best) if current_best else None,
 					use_haversine=use_haversine,
 				)
 				assert current_diff, (

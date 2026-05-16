@@ -60,7 +60,7 @@ async def main() -> None:
 
 			for index, row in tqdm(group.iterrows(), total=n_pics, leave=False, unit='row'):
 				point = row.geometry
-				row_distances: Series = other_distances.loc[index]
+				row_distances: Series = other_distances.loc[index]  # ty:ignore[invalid-argument-type] #.loc should work with Hashable
 				closest_index = row_distances.idxmin()
 				distance = row_distances.loc[closest_index]
 				closest_row = subs.loc[closest_index]

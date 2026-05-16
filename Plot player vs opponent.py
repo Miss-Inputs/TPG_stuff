@@ -15,7 +15,6 @@ import geopandas
 from matplotlib import pyplot
 from shapely import Point, prepare
 from tqdm.auto import tqdm
-from travelpygame import PointSet, get_best_pic
 from travelpygame.util import format_dataframe, output_dataframe
 from travelpygame.util.point_construction import (
 	get_fixed_box_grid,
@@ -29,13 +28,14 @@ from lib.io_utils import load_point_set_from_arg
 if TYPE_CHECKING:
 	from pandas import Series
 	from shapely.geometry.base import BaseGeometry
+	from travelpygame.point_set import PointSet
 
 BboxType = tuple[float, float, float, float] | list[float] | Literal['max', 'min'] | None
 
 
 def get_grid(
-	left_player: PointSet,
-	right_player: PointSet,
+	left_player: 'PointSet',
+	right_player: 'PointSet',
 	resolution: float,
 	limit_bbox: BboxType,
 	spaced_amount: int | None = None,
@@ -71,7 +71,7 @@ def get_grid(
 	)
 
 
-def get_first_index_inside(geom: 'BaseGeometry', point_set: PointSet):
+def get_first_index_inside(geom: 'BaseGeometry', point_set: 'PointSet'):
 	is_within = point_set.points.within(geom)
 	if not is_within.any():
 		return None
@@ -80,7 +80,7 @@ def get_first_index_inside(geom: 'BaseGeometry', point_set: PointSet):
 
 
 def get_winner(
-	geom: 'BaseGeometry', left_player: PointSet, right_player: PointSet
+	geom: 'BaseGeometry', left_player: 'PointSet', right_player: 'PointSet'
 ) -> tuple[Literal['left', 'right', 'tie'], Any, Any]:
 	if not isinstance(geom, Point):
 		prepare(geom)
@@ -90,15 +90,15 @@ def get_winner(
 		if left_in_box:
 			if right_in_box:
 				return 'tie', left_in_box, right_in_box
-			return 'left', left_in_box, get_best_pic(right_player, point)[0]
+			return 'left', left_in_box, right_player.get_closest_index(point)[0]
 		if right_in_box:
 			# and not left_in_box
-			return 'right', get_best_pic(left_player, point)[0], right_in_box
+			return 'right', left_player.get_closest_index(point)[0], right_in_box
 	else:
 		point = geom
 	# TODO: Handle boxes where neither player has a point inside but they could win depending on what point of the box the target was (would need to think about that)
-	left_best_pic, left_distance = get_best_pic(left_player, point)
-	right_best_pic, right_distance = get_best_pic(right_player, point)
+	left_best_pic, left_distance = left_player.get_closest_index(point)
+	right_best_pic, right_distance = right_player.get_closest_index(point)
 	if left_distance == right_distance:
 		# Unlikely but might as well handle this case
 		result = 'tie'

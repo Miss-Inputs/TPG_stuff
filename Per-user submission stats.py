@@ -7,6 +7,7 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import geopandas
 import pandas
@@ -70,7 +71,7 @@ def get_stats(
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
 
 			anticentroid = get_geometry_antipode(point_set.centroid)
-			row = {
+			row: dict[str, Any] = {
 				'count': point_set.count,
 				'average_point': circular_mean_points(point_set.point_array),
 				'centroid': point_set.centroid,
