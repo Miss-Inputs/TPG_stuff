@@ -4,7 +4,9 @@
 import asyncio
 import logging
 from argparse import ZERO_OR_MORE, ArgumentParser, BooleanOptionalAction
+from collections.abc import Hashable
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,25 +15,29 @@ import numpy
 import pandas
 import shapely
 from aiohttp import ClientSession
-from travelpygame import PointSet, find_furthest_point, get_uniqueness
-from travelpygame.point_set_stats import find_geometric_median, get_total_uniqueness
+from travelpygame.point_set_stats import (
+	find_furthest_point,
+	find_geometric_median,
+	get_total_uniqueness,
+	get_uniqueness,
+)
 from travelpygame.util import (
 	circular_mean_xy,
 	fix_x_coord,
 	fix_y_coord,
-	format_dataframe,
-	format_distance,
-	format_point,
-	get_centroid,
-	get_closest_index,
-	get_extreme_corners_of_point_set,
+	format_area,
+	get_area,
+	get_geometry_antipode,
 	get_point_antipodes,
 )
-from travelpygame.util.io_utils import (
-	geometry_to_file_async,
-	output_dataframe,
-	output_geodataframe,
+from travelpygame.util.distance import cartesian_product_distances, geod_distance
+from travelpygame.util.formatting import (
+	format_dataframe,
+	format_distance,
+	format_number,
+	format_point,
 )
+from travelpygame.util.io_utils import geometry_to_file_async, output_dataframe, output_geodataframe
 from travelpygame.util.pandas_utils import detect_cat_cols
 
 from lib.format_utils import describe_point
@@ -39,6 +45,7 @@ from lib.io_utils import load_point_set_from_arg, load_polygons
 
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
+	from travelpygame.point_set import PointSet
 
 logger = logging.getLogger(__name__)
 
@@ -49,38 +56,8 @@ async def _maybe_describe_point(point: shapely.Point, session: ClientSession | N
 	return await describe_point(point, session, include_coords=True)
 
 
-async def print_furthest_point_from_poly(
-	points: PointSet, poly: 'BaseGeometry', session: ClientSession | None, name: str = 'polygon'
-):
-	furthest_point, dist = find_furthest_point(points.point_array, polygon=poly)
-	desc = await _maybe_describe_point(furthest_point, session)
-	closest_index, _ = get_closest_index(furthest_point, points.point_array)
-	print(
-		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {points.points.index[closest_index]}'
-	)
-
-
-async def print_furthest_point(
-	point_set: PointSet, initial: shapely.Point, session: ClientSession | None
-):
-	furthest_point, dist = find_furthest_point(point_set.point_array, initial)
-	desc = await _maybe_describe_point(furthest_point, session)
-	closest_index, _ = get_closest_index(furthest_point, point_set.point_array)
-	print(
-		f'Furthest point: {desc}, {format_distance(dist)} away, closest to {point_set.points.index[closest_index]}'
-	)
-
-	await print_furthest_point_from_poly(point_set, point_set.envelope, session, 'own bounding box')
-	await print_furthest_point_from_poly(
-		point_set, point_set.convex_hull, session, 'own convex hull'
-	)
-	await print_furthest_point_from_poly(
-		point_set, point_set.concave_hull, session, 'own concave hull'
-	)
-
-
 async def print_point(
-	point_set: PointSet,
+	point_set: 'PointSet',
 	point: shapely.Point,
 	name: str,
 	session: ClientSession | None,
@@ -109,59 +86,224 @@ async def print_point(
 	print()
 
 
-async def print_average_points(point_set: PointSet, session: ClientSession | None):
-	coords = point_set.coord_array
+@dataclass
+class PointSetStats:
+	# centres
+	circular_mean: shapely.Point
+	arithmetic_mean: shapely.Point
+	"""Just the mean of all the lat/lng coordinates"""
+	arithmetic_median: shapely.Point
+	closest_to_bbox: shapely.Point
+	raw_centroid: shapely.Point
+	"""Computed using normal geometric CRS, so technically wrong and assumes flat earth"""
+	centroid: shapely.Point
+	"""Computed using projected CRS"""
+	centre_of_extremes: shapely.Point
+	geometric_median: shapely.Point | None
+	"""Optional since it can take some time to compute"""
+	antipoint: shapely.Point | None
+	"""Furthest possible point from anywhere on earth, optional since it can take some time to compute"""
 
-	x, y = coords.T
-	circ_mean_x, circ_mean_y = circular_mean_xy(x, y)
-	circ = shapely.Point(circ_mean_x, circ_mean_y)
-	await print_point(point_set, circ, 'Circular mean point', session)
+	# extreme points
+	# Maybe some of these shouldn't be tuples and should instead be separated into two attributes
+	westmost: tuple[float, list[Hashable]]
+	"""(longitude, list of indexes at this longitude). Assumes the earth is flat and that -180 longitude is the edge of the planet, because WGS84"""
+	eastmost: tuple[float, list[Hashable]]
+	"""(longitude, list of indexes at this longitude). Assumes the earth is flat and that 180 longitude is the edge of the planet, because WGS84"""
+	northmost: tuple[float, list[Hashable]]
+	"""(latitude, list of indexes at this latitude)"""
+	southmost: tuple[float, list[Hashable]]
+	"""(latitude, list of indexes at this latitude)"""
+	nw_most: tuple[float, Hashable]
+	"""(distance, index closest to corner)"""
+	ne_most: tuple[float, Hashable]
+	"""(distance, index closest to corner)"""
+	sw_most: tuple[float, Hashable]
+	"""(distance, index closest to corner)"""
+	se_most: tuple[float, Hashable]
+	"""(distance, index closest to corner)"""
+	antipoint_closest: Hashable | None
 
-	mean = shapely.Point(fix_x_coord(x.mean()), fix_y_coord(y.mean()))
-	await print_point(point_set, mean, 'Mean point', session)
+	# Distances in metres that might be a good measure of the extent of one's travels
+	diagonal_dist: float
+	total_dist_from_centroid: float
+	max_dist_from_centroid: float
+	antipoint_dist: float | None
+	"""Distance from any point in the point set to the antipoint, so smaller numbers indicate more well-travelled (can cover own deadzones better). Optional since the antipoint can take some time to compute"""
+	# Other measures of extent
+	convex_hull_area: float
+	concave_hull_area: float
+	bbox_area: float
 
-	median_coords = numpy.median(coords, axis=0)
-	median = shapely.Point(fix_x_coord(median_coords[0]), fix_y_coord(median_coords[1]))
-	await print_point(point_set, median, 'Median point', session)
+	# Other stuff
+	closest_to_bbox_label: Hashable
+	closest_to_bbox_dist: float
 
-	centroid = point_set.centroid
-	await print_point(point_set, centroid, 'Centroid of all points', session)
-	centroid_distances = point_set.get_all_distances(centroid)
-	print(f'Total distance from centroid: {format_distance(centroid_distances.sum())}')
-	print(f'Mean distance from centroid: {format_distance(centroid_distances.mean())}')
+	@property
+	def centres(self) -> dict[str, shapely.Point]:
+		d = {
+			'Circular mean point': self.circular_mean,
+			'Mean point': self.arithmetic_mean,
+			'Median point': self.arithmetic_median,
+			'Closest point to bounding box corners': self.closest_to_bbox,
+			'Centroid': self.raw_centroid,
+			'Centroid (projected)': self.centroid,
+			'Centre of extremes': self.centre_of_extremes,
+		}
+		if self.geometric_median is not None:
+			d['Geometric median'] = self.geometric_median
+		return d
 
-	geo_median = find_geometric_median(point_set.points, centroid)
-	await print_point(point_set, geo_median, 'Geometric median', session)
+	@property
+	def distance_extents(self) -> dict[str, float]:
+		return {
+			'Diagonal distance of bounding box': self.diagonal_dist,
+			'Total distance from centroid': self.total_dist_from_centroid,
+			'Maximum distance from centroid': self.max_dist_from_centroid,
+		}
+
+	@property
+	def area_extents(self) -> dict[str, float]:
+		return {
+			'Bounding box area': self.bbox_area,
+			'Convex hull area': self.convex_hull_area,
+			'Concave hull area': self.concave_hull_area,
+		}
 
 
-async def print_extreme_points(point_set: PointSet, session: ClientSession | None):
+def get_point_set_stats(point_set: 'PointSet', *, find_geomedian: bool, find_antipoint: bool):
 	geo = point_set.points
+	coords = shapely.get_coordinates(geo)
 	west, south, east, north = geo.total_bounds
+	sw = shapely.Point(west, south)
+	se = shapely.Point(east, south)
+	nw = shapely.Point(west, north)
+	ne = shapely.Point(east, north)
+	bbox = shapely.box(west, south, east, north)
+	x, y = coords.T
+	d = dict(point_set.items())
 
-	westmost = geo[geo.x == west]
-	eastmost = geo[geo.x == east]
-	southmost = geo[geo.y == south]
-	northmost = geo[geo.y == north]
-	print('Westmost point(s):', ', '.join(westmost.index), f'({west})')
-	print('Eastmost point(s):', ', '.join(eastmost.index), f'({east})')
-	print('Southmost point(s):', ', '.join(southmost.index), f'({south})')
-	print('Northmost point(s):', ', '.join(northmost.index), f'({north})')
-	print()
-
-	nw, ne, se, sw = get_extreme_corners_of_point_set(geo)
-	print(f'Northwestmost point: {nw}')
-	print(f'Northeastmost point: {ne}')
-	print(f'Southeastmost point: {se}')
-	print(f'Southwestmost point: {sw}')
-	print()
+	westmost = geo[geo.x == west].index.tolist()
+	eastmost = geo[geo.x == east].index.tolist()
+	northmost = geo[geo.y == north].index.tolist()
+	southmost = geo[geo.y == south].index.tolist()
 
 	centre_x = fix_x_coord((west + east) / 2)
 	centre_y = fix_y_coord((south + north) / 2)
-	centre = shapely.Point(centre_x, centre_y)
-	await print_point(point_set, centre, 'Centre of extremes', session)
+	centre_of_extremes = shapely.Point(centre_x, centre_y)
+	circ_mean_x, circ_mean_y = circular_mean_xy(x, y)
+	circ_mean = shapely.Point(circ_mean_x, circ_mean_y)
+	mean = shapely.Point(fix_x_coord(x.mean()), fix_y_coord(y.mean()))
+	median_coords = numpy.median(coords, axis=0)
+	median = shapely.Point(fix_x_coord(median_coords[0]), fix_y_coord(median_coords[1]))
+
+	bbox_dists = cartesian_product_distances(
+		geo, geopandas.GeoSeries([sw, se, nw, ne], index=['sw', 'se', 'nw', 'ne'])
+	)
+	total_bbox_dists = bbox_dists.sum(axis='columns')
+	closest_index_to_corners = total_bbox_dists.idxmax()
+	closest_to_bbox_dist = total_bbox_dists.loc[closest_index_to_corners]
+	closest_to_corners = d[closest_index_to_corners]
+	nwmost, nw_dist = point_set.get_closest_index(nw)
+	nemost, ne_dist = point_set.get_closest_index(ne)
+	swmost, sw_dist = point_set.get_closest_index(sw)
+	semost, se_dist = point_set.get_closest_index(se)
+	diagonal_dist = geod_distance(sw, ne)
+
+	raw_centroid = shapely.centroid(point_set.multipoint)
+	centroid = point_set.centroid
+	centroid_distances = point_set.get_all_distances(centroid)
+	total_centroid_dist = centroid_distances.sum()
+	max_centroid_dist = centroid_distances.max()
+
+	if find_antipoint:
+		initial = get_geometry_antipode(circ_mean)
+		antipoint, antipoint_dist = find_furthest_point(geo, initial)
+		antipoint_closest, _ = point_set.get_closest_index(antipoint)
+	else:
+		antipoint = antipoint_dist = antipoint_closest = None
+	geo_median = find_geometric_median(geo, centroid) if find_geomedian else None
+
+	return PointSetStats(
+		circ_mean,
+		mean,
+		median,
+		closest_to_corners,
+		raw_centroid,
+		centroid,
+		centre_of_extremes,
+		geo_median,
+		antipoint,
+		(west, westmost),
+		(east, eastmost),
+		(north, northmost),
+		(south, southmost),
+		(nw_dist, nwmost),
+		(ne_dist, nemost),
+		(sw_dist, swmost),
+		(se_dist, semost),
+		antipoint_closest,
+		diagonal_dist,
+		total_centroid_dist,
+		max_centroid_dist,
+		antipoint_dist,
+		get_area(point_set.convex_hull),
+		get_area(point_set.concave_hull),
+		get_area(bbox),
+		closest_index_to_corners,
+		closest_to_bbox_dist,
+	)
 
 
-def print_unique_points(point_set: PointSet, uniqueness_path: Path | None):
+async def print_centre_points(
+	point_set: 'PointSet', stats: PointSetStats, session: ClientSession | None
+):
+	for name, point in stats.centres.items():
+		if name == 'Closest point to bounding box corners':
+			continue
+		await print_point(point_set, point, name, session)
+
+	print(
+		f'Closest point to all corners of bounding box: {stats.closest_to_bbox_label}, {format_distance(stats.closest_to_bbox_dist)}'
+	)
+
+
+def _join_labels(labels: list[Hashable]):
+	if len(labels) == 1:
+		return f': {labels[0]}'
+	joined = ', '.join(str(label) for label in labels)
+	return f's: {joined}'
+
+
+def print_extreme_points(stats: PointSetStats):
+	west, westmost = stats.westmost
+	east, eastmost = stats.eastmost
+	north, northmost = stats.northmost
+	south, southmost = stats.southmost
+
+	print(f'Westmost point{_join_labels(westmost)} ({format_number(west, 12)}°)')
+	print(f'Eastmost point{_join_labels(eastmost)} ({format_number(east, 12)}°)')
+	print(f'Northmost point{_join_labels(northmost)} ({format_number(north, 12)}°)')
+	print(f'Southmost point{_join_labels(southmost)} ({format_number(south, 12)}°)')
+
+	nw_dist, nwmost = stats.nw_most
+	ne_dist, nemost = stats.ne_most
+	sw_dist, swmost = stats.sw_most
+	se_dist, semost = stats.se_most
+	print(f'Northwestmost point: {nwmost}, {format_distance(nw_dist)} away from corner')
+	print(f'Northeastmost point: {nemost}, {format_distance(ne_dist)} away from corner')
+	print(f'Southwestmost point: {swmost}, {format_distance(sw_dist)} away from corner')
+	print(f'Southeastmost point: {semost}, {format_distance(se_dist)} away from corner')
+
+
+def print_extents(stats: PointSetStats):
+	for name, distance in stats.distance_extents.items():
+		print(f'{name}: {format_distance(distance)}')
+	for name, area in stats.area_extents.items():
+		print(f'{name}: {format_area(area)}')
+
+
+def print_unique_points(point_set: 'PointSet', uniqueness_path: Path | None):
 	closest, uniqueness_ = get_uniqueness(point_set.points)
 	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
 	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
@@ -181,7 +323,39 @@ def print_unique_points(point_set: PointSet, uniqueness_path: Path | None):
 	)
 
 
-def print_column_stats(point_set: PointSet, category_cols: list[str] | None, sep_char: str | None):
+async def print_furthest_point_from_poly(
+	points: 'PointSet', poly: 'BaseGeometry', session: ClientSession | None, name: str = 'polygon'
+):
+	furthest_point, dist = find_furthest_point(points.point_array, polygon=poly)
+	desc = await _maybe_describe_point(furthest_point, session)
+	closest_index, _ = points.get_closest_index(furthest_point)
+	print(
+		f'Furthest point within {name}: {desc}, {format_distance(dist)} away, closest to {closest_index}'
+	)
+
+
+async def print_furthest_points(
+	point_set: 'PointSet', stats: PointSetStats, session: ClientSession | None
+):
+	if stats.antipoint:
+		assert stats.antipoint_dist is not None
+		desc = await _maybe_describe_point(stats.antipoint, session)
+		print(
+			f'Furthest point: {desc}, {format_distance(stats.antipoint_dist)} away, closest to {stats.antipoint_closest}'
+		)
+
+	await print_furthest_point_from_poly(point_set, point_set.envelope, session, 'own bounding box')
+	await print_furthest_point_from_poly(
+		point_set, point_set.convex_hull, session, 'own convex hull'
+	)
+	await print_furthest_point_from_poly(
+		point_set, point_set.concave_hull, session, 'own concave hull'
+	)
+
+
+def print_column_stats(
+	point_set: 'PointSet', category_cols: list[str] | None, sep_char: str | None
+):
 	if not category_cols:
 		category_cols = detect_cat_cols(point_set.gdf)
 	if not category_cols:
@@ -295,6 +469,20 @@ async def main() -> None:
 		default='/',
 		help='With --column-stats, split columns by this character (single slash / by default) to have multiple values in one column. Use empty string as an argument to disable',
 	)
+	argparser.add_argument(
+		'--geomedian',
+		'--geometric-median',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Calculate the geometric median of all points, defaults to True.',
+	)
+	argparser.add_argument(
+		'--antipoint',
+		'--furthest-away-point',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Calculate the furthest away point anywhere in the world from any points, defaults to True.',
+	)
 
 	args = argparser.parse_args()
 
@@ -328,16 +516,25 @@ async def main() -> None:
 	antipoints_mp = shapely.MultiPoint(antipoints)
 	antihull = shapely.concave_hull(antipoints_mp)
 	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
+
 	if args.column_stats or args.category_columns:
 		print_column_stats(point_set, args.category_columns, args.split_categories)
 
 	print_unique_points(point_set, args.uniqueness_path)
+	stats = get_point_set_stats(
+		point_set, find_geomedian=args.geomedian, find_antipoint=args.antipoint
+	)
 
 	use_reverse_geocode: bool = args.reverse_geocode
 	async with ClientSession() if use_reverse_geocode else nullcontext() as sesh:
-		await print_extreme_points(point_set, sesh)
-		await print_average_points(point_set, sesh)
-		await print_furthest_point(point_set, get_centroid(antipoints_mp), sesh)
+		print_extreme_points(stats)
+		print('-' * 10)
+		await print_centre_points(point_set, stats, sesh)
+		print('-' * 10)
+		print_extents(stats)
+		print('-' * 10)
+		await print_furthest_points(point_set, stats, sesh)
+
 		polygon_path: Path | None = args.polygon_path
 		if polygon_path:
 			polygon = await asyncio.to_thread(load_polygons, polygon_path)
