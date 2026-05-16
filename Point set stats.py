@@ -15,12 +15,7 @@ import numpy
 import pandas
 import shapely
 from aiohttp import ClientSession
-from travelpygame.point_set_stats import (
-	find_furthest_point,
-	find_geometric_median,
-	get_total_uniqueness,
-	get_uniqueness,
-)
+from travelpygame.point_set_stats import find_furthest_point, find_geometric_median
 from travelpygame.util import (
 	circular_mean_xy,
 	fix_x_coord,
@@ -30,7 +25,11 @@ from travelpygame.util import (
 	get_geometry_antipode,
 	get_point_antipodes,
 )
-from travelpygame.util.distance import cartesian_product_distances, geod_distance
+from travelpygame.util.distance import (
+	cartesian_product_distances,
+	geod_distance,
+	self_cartesian_product_distances,
+)
 from travelpygame.util.formatting import (
 	format_dataframe,
 	format_distance,
@@ -304,22 +303,37 @@ def print_extents(stats: PointSetStats):
 
 
 def print_unique_points(point_set: 'PointSet', uniqueness_path: Path | None):
-	closest, uniqueness_ = get_uniqueness(point_set.points)
-	uniqueness = pandas.DataFrame({'closest': closest, 'uniqueness': uniqueness_})
-	uniqueness = uniqueness.sort_values('uniqueness', ascending=False)
-	if uniqueness_path:
-		output_dataframe(uniqueness, uniqueness_path)
-	print(format_dataframe(uniqueness, 'uniqueness'))
+	# TODO: Calculation and printing should be separated
+	distances = pandas.DataFrame(self_cartesian_product_distances(point_set.points))
+	closest = distances.idxmin(axis='columns')
+	uniqueness = distances.min(axis='columns')
+	furthest = distances.idxmax(axis='columns')
+	furthest_dist = distances.max(axis='columns')
+	total_uniqueness = distances.sum(axis='columns')
 
-	total_uniqueness = get_total_uniqueness(point_set.points)
-	avg_uniqueness = total_uniqueness / (point_set.points.size - 1)
+	df = pandas.DataFrame(
+		{
+			'closest': closest,
+			'uniqueness': uniqueness,
+			'furthest': furthest,
+			'furthest_dist': furthest_dist,
+			'total_uniqueness': total_uniqueness,
+			'mean_uniqueness': total_uniqueness / (point_set.count - 1),
+		}
+	)
+	df = df.sort_values('mean_uniqueness', ascending=False)
+	if uniqueness_path:
+		output_dataframe(df, uniqueness_path)
 	print(
-		format_dataframe(
-			pandas.DataFrame(
-				{'total_uniqueness': total_uniqueness, 'avg_uniqueness': avg_uniqueness}
-			),
-			('total_uniqueness', 'avg_uniqueness'),
-		)
+		format_dataframe(df, ['uniqueness', 'furthest_dist', 'total_uniqueness', 'mean_uniqueness'])
+	)
+	stacked = distances.stack()
+	assert isinstance(stacked, pandas.Series), f'stacked is {type(stacked)}'
+	assert not isinstance(stacked, pandas.DataFrame), 'why'
+	index_from, index_to = stacked.idxmax()  # ty:ignore[not-iterable] #It is iterable because stacked has a MultiIndex
+	max_dist = stacked.max()
+	print(
+		f'Maximum distance between any two points: {index_from} to {index_to}, {format_distance(max_dist)}'
 	)
 
 
@@ -504,6 +518,9 @@ async def main() -> None:
 	if args.concave_hull_path:
 		await geometry_to_file_async(args.concave_hull_path, point_set.concave_hull)
 
+	if args.column_stats or args.category_columns:
+		print_column_stats(point_set, args.category_columns, args.split_categories)
+
 	antipoints = get_point_antipodes(geo)
 	if args.antipodes_path:
 		antipodes_gdf = geopandas.GeoDataFrame(
@@ -513,12 +530,6 @@ async def main() -> None:
 		await asyncio.to_thread(
 			output_geodataframe, antipodes_gdf, args.antipodes_path, index=False
 		)
-	antipoints_mp = shapely.MultiPoint(antipoints)
-	antihull = shapely.concave_hull(antipoints_mp)
-	assert isinstance(antihull, shapely.Polygon), f'antihull is {type(antihull)}, expected Polygon'
-
-	if args.column_stats or args.category_columns:
-		print_column_stats(point_set, args.category_columns, args.split_categories)
 
 	print_unique_points(point_set, args.uniqueness_path)
 	stats = get_point_set_stats(
@@ -532,8 +543,9 @@ async def main() -> None:
 		await print_centre_points(point_set, stats, sesh)
 		print('-' * 10)
 		print_extents(stats)
-		print('-' * 10)
-		await print_furthest_points(point_set, stats, sesh)
+		if args.antipoint:
+			print('-' * 10)
+			await print_furthest_points(point_set, stats, sesh)
 
 		polygon_path: Path | None = args.polygon_path
 		if polygon_path:
