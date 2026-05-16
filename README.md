@@ -10,7 +10,7 @@ The phrase "TPG data" or "TPG data file" is something I haven't invented the bes
 
 The phrase "point set" is also something I haven't figured out the best wording for, it refers to a file containing a list of locations that you have pics for (with optional name/description), such as a .csv exported from [scottytremaine's voronoi generator](https://tpg.scottytremaine.uk/), or can be an .ods or .xlsx spreadsheet, or a .geojson/.gpkg/etc file containing point geometries, or various other formats that pandas DataFrames can be loaded from (that would have a lat and lng column). "Target points" or "target point set" refers to these same formats but instead of locations that you have pics for/have been to, it represents locations that you want the distance to, e.g. TPG rounds.
 
-The phrase "TPG area" or "defined area" refers to the part of the world that rounds in a regional TPG (AusTPG, EuroTPG, Japan TPG, etc) can be drawn from.
+The phrase "TPG area" or "defined area" refers to the part of the world that rounds in a regional TPG (AusTPG, EuroTPG, Japan TPG, etc) can be drawn from (though it could also be said that the TPG area of main TPG is all land outside of Antarctica, so not necessarily for regional TPGs).
 
 ### For TPG players
 
@@ -54,11 +54,11 @@ Things to help figure out where to actually go in real life so you can have a be
 
 - Simulate rounds: Re-runs each TPG round or simulates a new one with points from a file or randomly generated, with every user's known pics from TPG data, finding what everyone would have picked for each round if everyone played every round in history and always had every pic that they are known to have.
 
-### Other stats
+### Other stats (that may or may not be interesting)
 
 - Custom travel map: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
+- Find submission clusters: Find points in all submissions that are clustered together, or those that are not.
 - Furthest away points from anyone: Find points that are as far away as possible from any submission by anyone.
-- Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
 - Most unique pics: Finds pics that are far away from anyone else's pics.
 - Most used pics for each user: Finds pics that are used the most for each player.
 - Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
@@ -67,6 +67,7 @@ Things to help figure out where to actually go in real life so you can have a be
 
 ### Unsorted
 
+- Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
 - Get elevation from DEM: Given your point set, and a .tiff file or whatever representing a DEM (digital elevation model), finds the elevation of your points (where the DEM has that data). Elevation is not used in TPG except in some hypothetical spinoffs, but maybe you might like to add that as a column for funsies.
 
 ### Unsorted and may be dismantled/deleted
