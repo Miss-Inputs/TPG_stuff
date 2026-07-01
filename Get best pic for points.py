@@ -1,55 +1,30 @@
 #!/usr/bin/env python3
 """Find the best pic for each point in a given set of points, so you can use it to predict how well you might do in a particular TPG, for example."""
 
+import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections.abc import Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pandas
+from pyproj import CRS
 from shapely import Point
 from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.util import (
 	find_first_matching_column,
 	first_unique_column_label,
 	format_dataframe,
 	format_distance,
 	format_point,
-	get_distances,
 	load_points,
 	output_dataframe,
 )
 from travelpygame.util.pandas_utils import maybe_name_cols
 
-if TYPE_CHECKING:
-	import geopandas
+from lib.io_utils import load_point_set_from_path
 
-
-def get_best_pic(
-	dest: Point,
-	dest_name: str,
-	sources: 'geopandas.GeoDataFrame',
-	source_name_col: Hashable | None = 'name',
-	*,
-	use_haversine: bool = True,
-):
-	distances = get_distances(dest, sources.geometry, use_haversine=use_haversine)
-	shortest_dist = distances.min()
-	is_closest = distances == shortest_dist
-	closest = sources[is_closest]
-	if closest.index.size > 1:
-		tqdm.write(f'Multiple sources were equally distant to {dest_name}: {closest}')
-
-	if source_name_col:
-		closest_name = closest[source_name_col].iloc[0]
-	else:
-		closest_point = closest.geometry.iloc[0]
-		assert isinstance(closest_point, Point), (
-			f'shortest_point was {type(closest_point)}, expected Point'
-		)
-		closest_name = format_point(closest_point)
-	return closest_name, shortest_dist
+logger = logging.getLogger()
 
 
 def main() -> None:
@@ -85,39 +60,65 @@ def main() -> None:
 		help='Use haversine for distances, defaults to true',
 		default=True,
 	)
+
+	tqdm_args = argparser.add_argument_group('tqdm args')
+	tqdm_args.add_argument(
+		'--postfix',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Use tqdm set_postfix, defaults to true',
+	)
+	tqdm_args.add_argument(
+		'--tqdm-miniters',
+		'--miniters',
+		help='Set miniters argument for tqdm, in case it is causing too much overhead',
+	)
+
 	args = argparser.parse_args()
 
-	sources = load_points(args.points)
-	dests = load_points(args.targets)
-	if not dests.active_geometry_name:
-		raise ValueError('no geometry in dests?')
-	source_name_col = (
-		args.source_name_col
-		or find_first_matching_column(sources, maybe_name_cols)
-		or first_unique_column_label(sources)
+	point_set = asyncio.run(
+		load_point_set_from_path(args.points, point_name_col=args.source_name_col, force_wgs84=True)
 	)
+	dests = load_points(args.targets)
 	dest_name_col = (
 		args.dest_name_col
 		or find_first_matching_column(dests, maybe_name_cols)
 		or first_unique_column_label(dests)
 	)
 
+	wgs84 = CRS.from_user_input('WGS84')
+
+	if dests.crs and not dests.crs.equals(wgs84):
+		logger.info('Reprojecting targets from %s to WGS84', dests.crs)
+		dests = dests.to_crs(wgs84)
+
+	targets = dests.geometry
+	target_names = (
+		dests[dest_name_col].to_dict()
+		if dest_name_col
+		else {index: format_point(p) for index, p in targets.items()}
+	)
+
 	best_pics = {}
 	distances = {}
-	names = {}
-	with tqdm(dests.iterrows(), 'Finding best pics', dests.index.size, unit='target') as t:
-		for index, dest_row in t:
-			dest = dest_row[dests.active_geometry_name]
-			if not isinstance(dest, Point):
-				raise TypeError(f'Targets had {type(dest)} at index {index}, expected Point')
-			name = dest_row[dest_name_col] if dest_name_col else f'{index}: {format_point(dest)}'  # ty: ignore[invalid-argument-type]
-			t.set_postfix(target=name)
-			names[index] = name
-			best_pics[index], distances[index] = get_best_pic(
-				dest, name, sources, source_name_col, use_haversine=args.use_haversine
+	with tqdm(
+		targets.items(),
+		'Finding best pics',
+		targets.size,
+		unit='target',
+		miniters=args.tqdm_miniters,
+	) as t:
+		for index, target in t:
+			if not isinstance(target, Point):
+				raise TypeError(f'Targets had {type(target)} at index {index}, expected Point')
+			if args.postfix:
+				name = target_names[index]
+				t.set_postfix(target=name, refresh=args.tqdm_miniters is None)
+			best_pics[index], distances[index] = point_set.get_closest_index(
+				target, use_haversine=args.use_haversine
 			)
 
-	df = pandas.DataFrame({'dest': names, 'best_pic': best_pics, 'distance': distances})
+	df = pandas.DataFrame({'dest': target_names, 'best_pic': best_pics, 'distance': distances})
 	if df['dest'].is_unique:
 		df = df.set_index('dest')
 	df = df.sort_values('distance')
@@ -133,9 +134,11 @@ def main() -> None:
 	if args.threshold:
 		threshold: float = args.threshold * 1_000
 		counts = df[df['distance'] < threshold]['best_pic'].value_counts()
-		print(f'Number of times each pic was below {format_distance(threshold)}:', counts)
+		print(f'Number of times each pic was below {format_distance(threshold)}:')
+		print(counts)
 
 
 if __name__ == '__main__':
 	logging.basicConfig(level=logging.INFO)
-	main()
+	with logging_redirect_tqdm():
+		main()

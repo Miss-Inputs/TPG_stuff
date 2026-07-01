@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pandas
 import shapely
 from async_lru import alru_cache
+from pyproj import CRS
 from tqdm.auto import tqdm
 from travelpygame import (
 	PointSet,
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 	from geopandas import GeoDataFrame
 
 logger = logging.getLogger(__name__)
+
+_wgs84_crs = CRS.from_epsg(4326)
 
 
 def latest_file_matching_format_pattern(path: Path) -> Path:
@@ -100,8 +103,9 @@ async def load_point_set_from_path(
 	projected_crs_arg: str | None = None,
 	name: str | None = None,
 	*,
+	force_wgs84: bool = False,
 	force_unheadered: bool = False,
-):
+) -> PointSet:
 	"""Point set name will be set to the path stem if `name` is None"""
 	name = name or path.stem
 	gdf = await load_points_async(
@@ -112,9 +116,12 @@ async def load_point_set_from_path(
 		has_header=False if force_unheadered else None,
 	)
 	assert gdf.crs, f'gdf {name} had no crs, which should never happen'
-	if not gdf.crs.is_geographic:
+	if force_wgs84 and not gdf.crs.equals(_wgs84_crs):
+		logger.info('Converting %s from %s to WGS84', name, gdf.crs)
+		gdf = gdf.to_crs(_wgs84_crs)
+	elif not gdf.crs.is_geographic:
 		logger.warning('%s had non-geographic CRS %s, converting to WGS84', name, gdf.crs)
-		gdf = gdf.to_crs('wgs84')
+		gdf = gdf.to_crs(_wgs84_crs)
 
 	gdf = set_name_col(gdf, point_name_col, path)
 
@@ -133,6 +140,7 @@ async def load_point_set_from_arg(
 	projected_crs_arg: str | None = None,
 	settings_or_path: Path | Settings | None = None,
 	*,
+	force_wgs84: bool = False,
 	force_unheadered: bool = False,
 ) -> PointSet:
 	if path_or_name.startswith('player:'):
@@ -149,6 +157,7 @@ async def load_point_set_from_arg(
 		point_name_col,
 		projected_crs_arg,
 		# could have another parameter for custom point set name but eh
+		force_wgs84=force_wgs84,
 		force_unheadered=force_unheadered,
 	)
 
