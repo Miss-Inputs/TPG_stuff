@@ -41,7 +41,10 @@ from travelpygame.util import (
 from lib.io_utils import load_point_set_from_arg
 
 
-def get_distances(points: PointSet, new_points: geopandas.GeoDataFrame, *, use_haversine: bool):
+def get_distances(
+	points: PointSet, new_points: geopandas.GeoDataFrame, *, use_haversine: bool
+) -> geopandas.GeoDataFrame:
+	"""Finds the closest point in points to each of new_points."""
 	rows = []
 	with tqdm(
 		new_points.geometry.items(), 'Calculating distances', new_points.index.size, unit='point'
@@ -70,31 +73,21 @@ def get_distances(points: PointSet, new_points: geopandas.GeoDataFrame, *, use_h
 
 def get_where_pics_better(
 	points: PointSet,
-	new_points: geopandas.GeoSeries,
+	new_points: PointSet,
 	targets: geopandas.GeoDataFrame,
 	*,
 	use_haversine: bool = True,
-):
+) -> pandas.DataFrame:
+	"""Just calls new_pic_eval.find_if_new_pics_better but filters the result to only rows where the new points are better."""
 	results = find_if_new_pics_better(points, new_points, targets, use_haversine=use_haversine)
 	better = results[results['is_new_better']].copy().drop(columns='is_new_better')
 	better['diff'] = better['current_distance'] - better['new_distance']
 	return better.sort_values('diff', ascending=False)
 
 
-async def eval_with_targets(
-	points: PointSet,
-	new_points: geopandas.GeoDataFrame,
-	target_paths: list[Path],
-	target_output_path: Path | None,
-	output_path: Path | None,
-	target_name_col: str | None,
-	*,
-	use_haversine: bool = True,
-	find_if_any_pics_better: bool = True,
-):
-	"""The function name kinda sucks but if it starts with test_ then Ruff thinks it's a test function and complains about things accordingly"""
-	targets = await asyncio.to_thread(load_points_or_rounds, target_paths)
-	targets, new_index = maybe_set_index_name_col(targets, target_name_col)
+async def _load_targets(paths: list[Path], name_col: str | None) -> PointSet:
+	targets = await asyncio.to_thread(load_points_or_rounds, paths)
+	targets, new_index = maybe_set_index_name_col(targets, name_col)
 	dupe_geometry = targets.duplicated('geometry', keep=False)
 	if dupe_geometry.any():
 		print('Targets had duplicate geometries, only keeping first of each')
@@ -107,16 +100,33 @@ async def eval_with_targets(
 		targets.index = Index(
 			[format_point(geo) if isinstance(geo, Point) else str(geo) for geo in targets.geometry]
 		)
+	name = paths[0].stem if len(paths) == 1 else 'targets'
+	return PointSet(targets, name)
+
+
+async def eval_with_targets(
+	points: PointSet,
+	new_points: PointSet,
+	target_paths: list[Path],
+	target_output_path: Path | None,
+	output_path: Path | None,
+	target_name_col: str | None,
+	*,
+	use_haversine: bool,
+	find_if_any_pics_better: bool,
+):
+	"""Tests which of `targets` are improved by `new_points` over `points` and outputs stuff.
+	The function name kinda sucks but I dunno. If it starts with test_ then Ruff thinks it's a test function and complains about things accordingly.
+	"""
+	targets = await _load_targets(target_paths, target_name_col)
 
 	if find_if_any_pics_better:
-		better = get_where_pics_better(
-			points, new_points.geometry, targets, use_haversine=use_haversine
-		)
+		better = get_where_pics_better(points, new_points, targets.gdf, use_haversine=use_haversine)
 		print('Number of times each pic was better (with all new pics at once):')
 		better_count = (
 			better['new_best']
 			.value_counts(sort=False)
-			.reindex(new_points.index, fill_value=0)
+			.reindex(new_points.points.index, fill_value=0)
 			.sort_values(ascending=False)
 		)
 		print(better_count[better_count > 0])
@@ -127,15 +137,15 @@ async def eval_with_targets(
 			await asyncio.to_thread(output_dataframe, better, target_output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		points.points, targets, use_haversine=use_haversine
+		points.points, targets.points, use_haversine=use_haversine
 	)
 	print(f'Worst case target: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}')
-	combined = pandas.concat([points.gdf, new_points])
+	combined = pandas.concat([points.gdf, new_points.gdf])
 	assert isinstance(combined, geopandas.GeoDataFrame), (
-		f'concat(points.gdf, new_points) resulted in {(type(combined))} and not GeoDataFrame'
+		f'concat(points.gdf, new_points.gdf) resulted in {(type(combined))} and not GeoDataFrame'
 	)
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		combined, targets, use_haversine=use_haversine
+		combined, targets.points, use_haversine=use_haversine
 	)
 	print(
 		f'Worst case target after adding new pics: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}'
@@ -144,7 +154,7 @@ async def eval_with_targets(
 	diffs = find_new_pics_better_individually(
 		points, new_points, targets, use_haversine=use_haversine
 	)
-	not_used = ', '.join(new_points.index.difference(diffs.index))
+	not_used = ', '.join(new_points.gdf.index.difference(diffs.index))
 	if not_used:
 		print(f'Never better: {not_used}')
 	diffs = diffs.sort_values('mean', ascending=False)
@@ -359,7 +369,8 @@ async def main() -> None:
 	args = argparser.parse_args()
 
 	points = await load_point_set_from_arg(args.existing_points)
-	new_points = await load_points_async(args.new_points)
+	new_points_path: Path = args.new_points
+	new_points = await load_points_async(new_points_path)
 	new_points, new_index = maybe_set_index_name_col(new_points)
 	if new_index is None:
 		new_points.index = Index(
@@ -369,6 +380,7 @@ async def main() -> None:
 			]
 		)
 
+	# This part could maybe be a function but ehhh
 	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
 	threshold: float | None = args.threshold
 	if threshold:
@@ -376,16 +388,17 @@ async def main() -> None:
 		num_under = under_threshold.sum()
 		if num_under:
 			print(
-				f'Ignoring {num_under} new points as they are within {format_distance(args.threshold)} from existing points'
+				f'Ignoring {num_under} new points as they are within {format_distance(threshold)} from existing points'
 			)
 		new_points = new_points.drop(index=distances.loc[under_threshold, 'new_point'].to_list())
-		distances = distances[distances['distance'] >= args.threshold]
+		distances = distances[distances['distance'] >= threshold]
 	distances['distance'] = distances['distance'].map(format_distance)
 	distances['coords'] = distances['geometry'].map(format_point)
 	# Remember that coords here is for the new point, not closest, which might be unclear if you come back to look at this code later
 	print('Distances from existing points:')
 	print(distances.drop(columns='geometry').set_index('new_point'))
 	distances = distances.drop(columns='coords')
+	new_point_set = PointSet(new_points, new_points_path.stem)
 
 	if args.distances_output_path:
 		await asyncio.to_thread(
@@ -394,7 +407,7 @@ async def main() -> None:
 	if args.targets:
 		await eval_with_targets(
 			points,
-			new_points,
+			new_point_set,
 			args.targets,
 			args.target_output_path,
 			args.output_path,
