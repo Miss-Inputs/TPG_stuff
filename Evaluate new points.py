@@ -111,6 +111,7 @@ async def eval_with_targets(
 	target_output_path: Path | None,
 	output_path: Path | None,
 	target_name_col: str | None,
+	improvement_threshold: float | None,
 	*,
 	use_haversine: bool,
 	find_if_any_pics_better: bool,
@@ -152,12 +153,12 @@ async def eval_with_targets(
 	)
 
 	diffs = find_new_pics_better_individually(
-		points, new_points, targets, use_haversine=use_haversine
+		points, new_points, targets, improvement_threshold, use_haversine=use_haversine
 	)
 	not_used = ', '.join(new_points.gdf.index.difference(diffs.index))
 	if not_used:
 		print(f'Never better: {not_used}')
-	diffs = diffs.sort_values('mean', ascending=False)
+	diffs = diffs.sort_values('total', ascending=False)
 	print(format_dataframe(diffs, ('total', 'best', 'mean')))
 	if output_path:
 		await asyncio.to_thread(output_dataframe, diffs, output_path)
@@ -323,6 +324,11 @@ async def main() -> None:
 		default=True,
 	)
 	argparser.add_argument(
+		'--improvement-threshold',
+		type=float,
+		help='With --targets, optionally, only count improvements if the new pics improve your distance by over this amount (in km)',
+	)
+	argparser.add_argument(
 		'--use-haversine',
 		action=BooleanOptionalAction,
 		help='Use haversine for distances, defaults to true for consistency with main TPG',
@@ -383,7 +389,7 @@ async def main() -> None:
 	# This part could maybe be a function but ehhh
 	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
 	threshold: float | None = args.threshold
-	if threshold:
+	if threshold is not None:
 		under_threshold = distances['distance'] < threshold
 		num_under = under_threshold.sum()
 		if num_under:
@@ -405,6 +411,9 @@ async def main() -> None:
 			output_geodataframe, distances, args.distances_output_path, index=False
 		)
 	if args.targets:
+		improvement_threshold = (
+			args.improvement_threshold * 1_000 if args.improvement_threshold else None
+		)
 		await eval_with_targets(
 			points,
 			new_point_set,
@@ -412,6 +421,7 @@ async def main() -> None:
 			args.target_output_path,
 			args.output_path,
 			args.name_col,
+			improvement_threshold,
 			find_if_any_pics_better=args.find_if_any_pics_better,
 			use_haversine=args.use_haversine,
 		)
