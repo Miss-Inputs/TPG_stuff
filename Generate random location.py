@@ -4,6 +4,7 @@
 import asyncio
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import Counter, defaultdict
+from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -16,11 +17,16 @@ from pandas import Series
 from pyproj import Transformer
 from shapely import MultiPolygon, Point
 from tqdm.auto import tqdm
-from travelpygame import output_geodataframe, random_point_in_poly, random_points_in_poly
+from travelpygame.random_points import (
+	random_balanced_points,
+	random_point_in_poly,
+	random_points_in_poly,
+)
 from travelpygame.util import (
 	format_distance,
 	format_point,
 	get_polygons,
+	output_geodataframe,
 	read_geodataframe_async,
 	summarize_counter,
 )
@@ -29,7 +35,7 @@ from lib.format_utils import describe_point
 from lib.stats import get_longest_distance_from_point
 
 
-def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: list[str]):
+def _get_point_data(point: Point, gdf: 'geopandas.GeoDataFrame', value_cols: list[str]) -> Series:
 	"""point and gdf are assumed to be in the same CRS"""
 	rows = gdf[gdf.contains(point)].head(1).squeeze()
 	assert isinstance(rows, Series), f'Uh oh squeeze failed, we ended up with {type(rows)}'
@@ -42,15 +48,21 @@ async def _random_single_point_in_poly(
 	value_cols: list[str],
 	seed: int | None,
 	*,
+	balance_rows: bool,
 	stats: bool,
 	reverse_geocode: bool,
+	use_tqdm: bool,
 ):
-	async with ClientSession() as sesh:
+	if balance_rows:
+		raw_point = random_balanced_points(gdf, 1, seed, use_tqdm=False)[0]
+	else:
 		raw_point = random_point_in_poly(
-			gdf, seed, use_tqdm=True, desc='Finding point inside poly', unit='attempt'
+			gdf, seed, use_tqdm=use_tqdm, desc='Finding point inside poly', unit='attempt'
 		)
-		point = shapely.ops.transform(to_wgs84.transform, raw_point) if to_wgs84 else raw_point
-		print(format_point(point, None))
+	point = shapely.ops.transform(to_wgs84.transform, raw_point) if to_wgs84 else raw_point
+	print(format_point(point, None))
+
+	async with ClientSession() if reverse_geocode else nullcontext() as sesh:
 		if value_cols:
 			data = _get_point_data(raw_point, gdf, value_cols)
 			for k, v in data.items():
@@ -69,10 +81,22 @@ async def _random_single_point_in_poly(
 			furthest_point = shapely.ops.transform(
 				partial(to_utm.transform, direction='INVERSE'), utm_furthest_point
 			)
-			furthest_point_desc = await describe_point(furthest_point, sesh)
+			if sesh:
+				furthest_point_desc = await describe_point(furthest_point, sesh)
+				furthest_point_label = f'{format_point(furthest_point)} {furthest_point_desc}'
+			else:
+				furthest_point_label = format_point(furthest_point)
 			print(
-				f'Furthest possible point: {format_point(furthest_point)} {furthest_point_desc}: {format_distance(distance)} away'
+				f'Furthest possible point: {furthest_point_label}: {format_distance(distance)} away'
 			)
+
+
+def _print_data(total_data: dict[Any, Any]):
+	for col, values in total_data.items():
+		counter = Counter(values)
+		tqdm.write(f'{col}:')
+		tqdm.write(str(summarize_counter(counter)))
+		tqdm.write('-' * 10)
 
 
 async def _random_points_in_poly(
@@ -85,17 +109,25 @@ async def _random_points_in_poly(
 	print_each_point: bool,
 	stats: bool,
 	reverse_geocode: bool,
+	balance_rows: bool,
+	use_tqdm: bool,
 ) -> geopandas.GeoDataFrame:
 	random = default_rng(seed)
 	total_data: defaultdict[str, list[Any]] = defaultdict(list)
 	rows = []
-	points = random_points_in_poly(
-		gdf, num_points, random, use_tqdm=True, desc='Generating points', unit='point'
-	)
+	if balance_rows:
+		points = random_balanced_points(
+			gdf, num_points, random, use_tqdm=use_tqdm, desc='Generating points', unit='point'
+		)
+	else:
+		points = random_points_in_poly(
+			gdf, num_points, random, use_tqdm=use_tqdm, desc='Generating points', unit='point'
+		)
 	if to_wgs84:
 		points = [shapely.ops.transform(to_wgs84.transform, point) for point in points]
 	gdf_wgs84 = gdf if gdf.crs and gdf.crs.equals('wgs84') else gdf.to_crs('wgs84')
-	async with ClientSession() as sesh:
+
+	async with ClientSession() if reverse_geocode else nullcontext() as sesh:
 		for i, point in enumerate(points):
 			if value_cols:
 				data = _get_point_data(point, gdf_wgs84, value_cols)
@@ -115,11 +147,8 @@ async def _random_points_in_poly(
 			if print_each_point:
 				tqdm.write(f'{i}: {format_point(point, None)} {desc}')
 	if stats:
-		for col, values in total_data.items():
-			counter = Counter(values)
-			tqdm.write(f'{col}:')
-			tqdm.write(str(summarize_counter(counter)))
-			tqdm.write('-' * 10)
+		_print_data(total_data)
+
 	return geopandas.GeoDataFrame(rows, geometry='point', crs='wgs84')
 
 
@@ -176,6 +205,12 @@ async def main() -> None:
 		dest='n',
 	)
 	gen_args.add_argument(
+		'--balance-rows',
+		action=BooleanOptionalAction,
+		default=False,
+		help='Balance between rows in input file equally, defaults to false',
+	)
+	gen_args.add_argument(
 		'--seed',
 		'--random-seed',
 		type=int,
@@ -218,6 +253,13 @@ async def main() -> None:
 		default=False,
 		help='Print all points generated if n > 1 (otherwise does nothing as the single point will be printed anyway), defaults to false unless --output-path is not specified',
 	)
+	output_args.add_argument(
+		'--tqdm',
+		'--use-tqdm',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Show progress with tqdm, defaults to true',
+	)
 	args = argparser.parse_args()
 
 	path = args.path
@@ -238,11 +280,17 @@ async def main() -> None:
 	else:
 		to_wgs84 = Transformer.from_crs(gdf.crs, 'wgs84', always_xy=True)
 	# TODO: Support points as well by selecting a random point (otherwise random_point_in_poly might end up doing that, but slowly)
-	# TODO: Option to balance equally between each row in gdf (this probably goes in travelpygame)
 
 	if n == 1:
 		await _random_single_point_in_poly(
-			gdf, to_wgs84, value_cols, seed, stats=args.stats, reverse_geocode=args.reverse_geocode
+			gdf,
+			to_wgs84,
+			value_cols,
+			seed,
+			stats=args.stats,
+			reverse_geocode=args.reverse_geocode,
+			balance_rows=args.balance_rows,
+			use_tqdm=args.tqdm,
 		)
 	else:
 		points = await _random_points_in_poly(
@@ -254,6 +302,8 @@ async def main() -> None:
 			print_each_point=args.print_all_points or output_path is None,
 			stats=args.stats,
 			reverse_geocode=args.reverse_geocode,
+			balance_rows=args.balance_rows,
+			use_tqdm=args.tqdm,
 		)
 		if output_path:
 			output_geodataframe(points, output_path, index=False)
