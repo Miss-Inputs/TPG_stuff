@@ -360,6 +360,12 @@ async def main() -> None:
 		point_set, find_geomedian=args.geomedian, find_antipoint=args.antipoint
 	)
 
+	polygon_path: Path | None = args.polygon_path
+	polygon_name = polygon = None
+	if polygon_path:
+		polygon_name = polygon_path.stem
+		polygon = await asyncio.to_thread(load_polygons, polygon_path)
+
 	use_reverse_geocode: bool = args.reverse_geocode
 	async with ClientSession() if use_reverse_geocode else nullcontext() as sesh:
 		print_extreme_points(stats)
@@ -371,16 +377,14 @@ async def main() -> None:
 			print('-' * 10)
 			await print_furthest_points(point_set, stats, sesh)
 
-		polygon_path: Path | None = args.polygon_path
-		if polygon_path:
-			polygon = await asyncio.to_thread(load_polygons, polygon_path)
 			if polygon:
-				await print_furthest_point_from_poly(point_set, polygon, sesh, polygon_path.stem)
+				assert polygon_name is not None
+				await print_furthest_point_from_poly(point_set, polygon, sesh, polygon_name)
 				await print_furthest_point_from_poly(
-					point_set, polygon.envelope, sesh, f'{polygon_path.stem} bounding box'
+					point_set, polygon.envelope, sesh, f'{polygon_name} bounding box'
 				)
 			else:
-				print(f'Could not find any polygons in {polygon_path.stem}')
+				print(f'Could not find any polygons in {polygon_name}')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Shows who was one place ahead of you in previous TPG rounds, and by how much. Attempts to figure out what point would be exactly as close from where you are, but that's a bit vague and doesn't always work."""
+
 import asyncio
 import logging
 import sys

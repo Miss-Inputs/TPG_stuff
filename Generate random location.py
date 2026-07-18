@@ -67,7 +67,7 @@ async def _random_single_point_in_poly(
 			data = _get_point_data(raw_point, gdf, value_cols)
 			for k, v in data.items():
 				print(f'{k}: {v}')
-		elif reverse_geocode:
+		elif reverse_geocode and sesh:
 			desc = await describe_point(point, sesh)
 			print(desc)
 		if stats:
@@ -137,7 +137,7 @@ async def _random_points_in_poly(
 						assert isinstance(k, str), type(k)
 						total_data[k].append(v)
 				rows.append({'point': point, **data.to_dict()})
-			elif reverse_geocode:
+			elif reverse_geocode and sesh:
 				desc = await describe_point(point, sesh)
 				rows.append({'point': point, 'name': desc})
 			else:
