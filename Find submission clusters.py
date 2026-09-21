@@ -49,6 +49,7 @@ def _self_cartesian_key(kv: tuple[Hashable, dict[Hashable, float]]):
 def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataFrame:
 	groupby = gdf.groupby('cluster_id', dropna=True)
 	rows = []
+	have_player_name_col = 'player_name' in gdf.columns
 	for cluster_id, cluster in sorted(groupby, key=_cluster_groupby_sort_key):
 		assert isinstance(cluster, GeoDataFrame), (
 			f'Somehow cluster group was {type(cluster)} and not GeoDataFrame'
@@ -61,14 +62,18 @@ def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataF
 		furthest_point = cluster.loc[furthest_index, 'geometry']  # ty:ignore[invalid-argument-type]
 
 		# Could have option to use closest_to_corners to get centre, but it's not that important and just for informational purposes
-		player_names = cluster['player_name'].dropna().unique()
-		n_players = player_names.size
+		if have_player_name_col:
+			player_names = cluster['player_name'].dropna().unique()
+			n_players = player_names.size
+		else:
+			player_names = None
+			n_players = None
 		rows.append(
 			{
 				'id': cluster_id,
 				'centre': centre,
 				'size': n,
-				'player': player_names[0] if n_players == 1 else None,
+				'player': player_names[0] if player_names and n_players == 1 else None,
 				'players': player_names,
 				'num_players': n_players,
 				'radius': furthest_dist,
@@ -77,8 +82,11 @@ def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataF
 
 		if print_stuff:
 			print(f'Cluster {cluster_id}: {n} items')
-			for _, row in cluster.iterrows():
-				print(row['player_name'], '@', format_point(row['geometry']))
+			for index, row in cluster.iterrows():
+				if have_player_name_col:
+					print(row['player_name'], '@', format_point(row['geometry']))
+				else:
+					print(f'{index}:', format_point(row['geometry']))
 			print('Centre:', format_point(centre))
 			print(
 				'Furthest from centre:',
@@ -92,7 +100,7 @@ def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataF
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
-		'--points',
+		'--points-path',
 		help="Optional path to load points to cluster, or player:<player name>/username:<username> to use an individual player's submissions, instead of using all TPG submissions",
 	)
 	argparser.add_argument(
@@ -121,15 +129,19 @@ def main() -> None:
 	# TODO: This could have some other different parameters to get submissions for a certain round etc
 
 	settings = Settings()
-	points_path: Path | None = args.points
+	points_path: Path | None = args.points_path
 	if points_path:
 		point_set = asyncio.run(
-			load_point_set_from_arg(args.points_path, settings_or_path=settings)
+			load_point_set_from_arg(str(points_path), settings_or_path=settings)
 		)
 		gdf = point_set.gdf
 	else:
-		subs_path = settings.all_subs_path
-		gdf = asyncio.run(load_or_fetch_submission_summary(subs_path))
+		summary = asyncio.run(
+			load_or_fetch_submission_summary(
+				settings.submission_summary_path, settings.tpg_export_path
+			)
+		)
+		gdf = GeoDataFrame(summary.submissions, geometry='point', crs='wgs84')
 
 	threshold: float = args.threshold
 	add_cluster_info(gdf, threshold)
@@ -145,6 +157,7 @@ def main() -> None:
 
 	clusters = get_cluster_info(gdf)
 	clusters = clusters.sort_values('radius')
+	clusters = clusters.dropna(how='all', axis='columns')
 	print(clusters)
 	output_path: Path | None = args.output_path
 	if output_path:
