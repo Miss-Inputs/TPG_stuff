@@ -16,7 +16,9 @@ class Settings(BaseSettings, extra='allow'):
 	"""Path to ADM_3.gpkg from GADM, for anything that might use subdivision borders etc"""
 	main_tpg_data_path: Path | None = None
 	"""Path to save data from main TPG as JSON"""
-	all_subs_path: Path | None = None
-	"""Path to save all submissions from all players (with player name column) as GeoJSON/etc"""
+	submission_summary_path: Path | None = None
+	"""Path to save summary of all known submissions by all players"""
+	tpg_export_path: Path | None = None
+	"""Path (or path pattern with {} as a wildcard, e.g. tpg-tracker-{}.geojson) with exported TPG tracker data from Cellery's site, as GeoJSON"""
 	tpg_wrapped_output_path: Path | None = None
 	"""Folder to save all TPG wrapped output"""

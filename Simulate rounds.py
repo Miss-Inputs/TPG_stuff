@@ -21,14 +21,7 @@ from travelpygame.simulation import (
 	get_player_summary,
 	get_round_summary,
 )
-from travelpygame.tpg_data import (
-	PlayerName,
-	Round,
-	ScoringOptions,
-	get_player_display_names,
-	load_rounds,
-	rounds_to_json,
-)
+from travelpygame.tpg_data import PlayerName, Round, ScoringOptions, load_rounds, rounds_to_json
 from travelpygame.util import (
 	format_dataframe,
 	format_distance,
@@ -173,7 +166,6 @@ def load_with_auto_index(path: PurePath | str, name: str | None) -> PointSet:
 
 
 async def load_point_sets(
-	point_sets_by_name: dict[PlayerName, PointSet] | None,
 	name: PlayerName | None,
 	points_path: Path | None,
 	threshold: int | None,
@@ -185,16 +177,10 @@ async def load_point_sets(
 	# TODO: This needs quite a bit of refactoring, seems we've been indecisive about what we're doing with it
 	# Like I'm not sure point_sets_by_name should be there because right now we're always just passing None, but maybe we were going to do something and now I don't know
 
-	point_sets_by_name = point_sets_by_name or {}
-	if load_per_user and not point_sets_by_name:
-		settings = Settings()
-		all_point_sets = await load_or_fetch_point_sets(settings.all_subs_path)
-		player_names = await get_player_display_names()
-		for ps in all_point_sets:
-			ps.name = player_names.get(ps.name, ps.name)
-			point_sets_by_name[ps.name] = ps
-	else:
-		player_names = {}
+	settings = Settings()
+	point_sets = (
+		await load_or_fetch_point_sets(settings, minimum_count=threshold) if load_per_user else []
+	)
 	if points_path:
 		if not name:
 			print(
@@ -202,13 +188,7 @@ async def load_point_sets(
 			)
 		else:
 			# TODO: Perchance we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
-			point_sets_by_name[name] = await asyncio.to_thread(
-				load_with_auto_index, points_path, name
-			)
-
-	point_sets = [
-		ps for ps in point_sets_by_name.values() if threshold is None or ps.count >= threshold
-	]
+			point_sets.append(await asyncio.to_thread(load_with_auto_index, points_path, name))
 
 	if additional_folders:
 		for folder in additional_folders:
@@ -407,7 +387,6 @@ def main() -> None:
 	# TODO: (Optionally) get players from existing_rounds
 	point_set = asyncio.run(
 		load_point_sets(
-			None,
 			name,
 			points_path,
 			args.threshold,

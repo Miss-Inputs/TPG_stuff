@@ -11,7 +11,6 @@ import contextily
 import geopandas
 import pandas
 from matplotlib import pyplot
-from travelpygame import load_or_fetch_submission_summary
 from travelpygame.util import (
 	first_unique_column_label,
 	output_dataframe,
@@ -20,6 +19,7 @@ from travelpygame.util import (
 	wgs84_geod,
 )
 
+from lib.io_utils import load_or_fetch_submission_summary
 from lib.settings import Settings
 
 

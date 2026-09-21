@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Collection, Hashable
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -9,18 +10,19 @@ import shapely
 from async_lru import alru_cache
 from pyproj import CRS
 from tqdm.auto import tqdm
-from travelpygame import (
-	PointSet,
+from travelpygame import PointSet, validate_points
+from travelpygame.submission_data import (
+	AllSubmissionData,
+	SubmissionSummary,
+	convert_cellery_geojson,
+	get_all_official_data,
 	get_all_point_sets,
-	load_or_fetch_submission_summary,
-	load_points,
-	load_points_async,
-	validate_points,
 )
-from travelpygame.tpg_data import PlayerName, PlayerUsername, get_player_username
 from travelpygame.util import (
 	format_point,
 	get_polygons,
+	load_points,
+	load_points_async,
 	maybe_set_index_name_col,
 	read_geodataframe,
 	try_auto_set_index,
@@ -31,6 +33,7 @@ from .settings import Settings
 
 if TYPE_CHECKING:
 	from geopandas import GeoDataFrame
+	from travelpygame.tpg_data import PlayerUsername
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +51,74 @@ def latest_file_matching_format_pattern(path: Path) -> Path:
 	return max(path.parent.glob(path.name.replace('{}', '*')))
 
 
-load_sub_summary_cached = alru_cache(1)(load_or_fetch_submission_summary)
+@alru_cache
+async def get_all_submission_data(
+	cellery_export_path_pattern: Path | None,
+	rounding: int | None = 6,
+	*,
+	forbid_extra: bool = False,
+) -> AllSubmissionData:
+	"""Gets submission/round info from exported data from Cellery's site if we have that, or official TPG API if not."""
+	# TODO: We should be saving the result somewhere
+	if cellery_export_path_pattern:
+		try:
+			path = latest_file_matching_format_pattern(cellery_export_path_pattern)
+		except ValueError:
+			pass
+		else:
+			return await convert_cellery_geojson(path, rounding, forbid_extra=forbid_extra)
+	logger.info('No TPG tracker export found, using official TPG only')
+	return await get_all_official_data(rounding, forbid_extra=forbid_extra)
+
+
+async def get_submission_summary(
+	cellery_export_path_pattern: Path | None,
+	rounding: int | None = 6,
+	*,
+	forbid_extra: bool = False,
+) -> SubmissionSummary:
+	data = await get_all_submission_data(
+		cellery_export_path_pattern, rounding, forbid_extra=forbid_extra
+	)
+	return SubmissionSummary(data.grouped_submissions)
+
+
+async def load_or_fetch_submission_summary(
+	path: Path | None,
+	cellery_export_path_pattern: Path | None = None,
+	rounding: int | None = 6,
+	*,
+	forbid_extra: bool = False,
+) -> SubmissionSummary:
+	"""Loads submission summary from a path if provided and exists, or imports it (and then saves if path is provided)."""
+	if path and await asyncio.to_thread(path.info.is_file):
+		try:
+			return await asyncio.to_thread(SubmissionSummary.from_file, path)
+		except FileNotFoundError:
+			pass
+
+	sub_summary = await get_submission_summary(
+		cellery_export_path_pattern, rounding, forbid_extra=forbid_extra
+	)
+	if path:
+		await asyncio.to_thread(sub_summary.save_to_file, path)
+	return sub_summary
+
+
+@alru_cache(maxsize=1)
+async def load_or_fetch_point_sets(
+	path: Path | Settings | None = None,
+	min_datetime: datetime | None = None,
+	min_count: int | None = None,
+) -> list[PointSet]:
+	if isinstance(path, Path):
+		export_path = None
+	else:
+		settings = path or Settings()
+		path = settings.submission_summary_path
+		export_path = settings.tpg_export_path
+	summary = await load_or_fetch_submission_summary(path, export_path, forbid_extra=True)
+	return get_all_point_sets(summary.per_player, min_datetime, min_count)
 
 
 def set_name_col(gdf: 'GeoDataFrame', name_col: Hashable | None, log_context: Any = None):
@@ -60,20 +130,8 @@ def set_name_col(gdf: 'GeoDataFrame', name_col: Hashable | None, log_context: An
 	return gdf
 
 
-@alru_cache(maxsize=1)
-async def load_or_fetch_point_sets(path: Path | Settings | None = None) -> list[PointSet]:
-	if not isinstance(path, Path):
-		settings = path or Settings()
-		path = settings.all_subs_path
-	summary = await load_sub_summary_cached(path)
-	return get_all_point_sets(summary)
-
-
-# TODO: Ideally ideally, there would be a load by username/display name/Discord ID function that optionally just uses morphior_api.get_player_submissions
-
-
 async def _load_by_username(
-	settings_or_path: Path | Settings | None, username: PlayerUsername
+	settings_or_path: Path | Settings | None, username: 'PlayerUsername'
 ) -> PointSet:
 	for point_set in await load_or_fetch_point_sets(settings_or_path):
 		if point_set.name == username:
@@ -81,17 +139,7 @@ async def _load_by_username(
 	raise KeyError(f'Username {username} not found')
 
 
-async def _load_by_display_name(
-	settings_or_path: Path | Settings | None, name: PlayerName
-) -> PointSet:
-	# TODO: Arguably better to just warn/error if name could refer to one or two usernames
-	username = await get_player_username(name)
-	if username is None:
-		raise KeyError(f'Player {name} not found')
-	return await _load_by_username(settings_or_path, username)
-
-
-# TODO: Load by Discord ID I guess
+# TODO: Load by Discord ID I guess? Although that would only be usable with SubmissionSummary created from main TPG data
 
 
 async def load_point_set_from_path(
@@ -144,10 +192,7 @@ async def load_point_set_from_arg(
 	force_unheadered: bool = False,
 ) -> PointSet:
 	if path_or_name.startswith('player:'):
-		player_name = path_or_name.removeprefix('player:')
-		return await _load_by_display_name(settings_or_path, player_name)
-	if path_or_name.startswith('username:'):
-		username = path_or_name.removeprefix('username:')
+		username = path_or_name.removeprefix('player:')
 		return await _load_by_username(settings_or_path, username)
 	return await load_point_set_from_path(
 		Path(path_or_name),

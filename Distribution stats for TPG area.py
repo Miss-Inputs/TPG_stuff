@@ -54,7 +54,7 @@ def main() -> None:
 		regions = regions.rename(columns={name_col: f'regions_{name_col}'})
 		name_col = f'regions_{name_col}'
 	regions = regions[[name_col, 'geometry']]
-	regions = regions.clip(tuple(gdf.total_bounds), keep_geom_type=True)  # pyright: ignore[reportArgumentType]
+	regions = regions.clip(tuple(gdf.total_bounds), keep_geom_type=True)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 	print('Combining gdf with regions, this can take some time')
 	time_started = perf_counter()
 	gdf = gdf.overlay(regions, 'identity', keep_geom_type=True)

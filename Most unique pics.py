@@ -13,10 +13,10 @@ import geopandas
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.submission_data import load_or_fetch_submission_summary
 from travelpygame.util.distance import cartesian_product_distances
 from travelpygame.util.io_utils import output_geodataframe
 
+from lib.io_utils import load_or_fetch_submission_summary
 from lib.settings import Settings
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ async def main() -> None:
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
 
-	subs_path = Settings().all_subs_path
+	subs_path = Settings().submission_summary_path
 	subs = await load_or_fetch_submission_summary(subs_path)
 	# Do NOT even think about trying to use self_cartesian_product_distances(subs.geometry) to just get vectorized distances all at once. You will accomplish nothing except rendering your computer inoperable for 20 minutes while it runs out of memory and thrashes. Do it whatever the other way is.
 

@@ -14,13 +14,12 @@ from typing import TYPE_CHECKING
 from geopandas import GeoDataFrame
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.point_set_stats import find_clusters
-from travelpygame.submission_data import load_or_fetch_submission_summary
 from travelpygame.util import format_distance
 from travelpygame.util.distance import self_cartesian_product_distances
 from travelpygame.util.formatting import format_point
 from travelpygame.util.io_utils import output_geodataframe
 
-from lib.io_utils import load_point_set_from_arg
+from lib.io_utils import load_or_fetch_submission_summary, load_point_set_from_arg
 from lib.settings import Settings
 
 if TYPE_CHECKING:

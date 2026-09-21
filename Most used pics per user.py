@@ -4,14 +4,14 @@
 import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
+from operator import itemgetter
 from pathlib import Path
 
 import geopandas
-from pandas import Series
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import load_or_fetch_submission_summary
 from travelpygame.util import output_geodataframe
 
+from lib.io_utils import load_or_fetch_submission_summary
 from lib.settings import Settings
 
 
@@ -42,40 +42,45 @@ async def main() -> None:
 	)
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
-	subs_path = Settings().all_subs_path
 
-	subs = await load_or_fetch_submission_summary(subs_path)
+	settings = Settings()
+	subs_path = settings.submission_summary_path
+	tpg_export_path = settings.tpg_export_path
+
+	sub_data = await load_or_fetch_submission_summary(subs_path, tpg_export_path, forbid_extra=True)
 
 	rows = []
-	for name, group in subs.groupby('username'):
-		n_pics = group.index.size
+	for name, group in sub_data.per_player.items():
+		n_pics = len(group)
 		if n_pics < args.threshold:
 			continue
 		if args.ties:
-			max_count = group['count'].max()
-			max_pics = group[group['count'] == max_count]
+			max_count = max(sub.count for sub in group)
+			most_common_pics = [sub for sub in group if sub.count == max_count]
 			# Ideally, we want to add any other info that might be in the submission summary
-			for _, row in max_pics.iterrows():
-				rows.append(
-					{
-						'player': row['player_name'],
-						'username': name,
-						'num_pics': n_pics,
-						'usage': max_count,
-						'geometry': row.geometry,
-					}
-				)
+			rows.extend(
+				{
+					'player': name,
+					'num_pics': n_pics,
+					'usage': max_count,
+					'first_used': most_common.earliest_known,
+					'last_used': most_common.latest_known,
+					'game_names': most_common.game_names,
+					'geometry': most_common.point,
+				}
+				for most_common in most_common_pics
+			)
 		else:
-			idxmax = group['count'].idxmax()
-			most_common = group.loc[idxmax]
-			assert isinstance(most_common, Series), f'most_common is {type(most_common)}'
+			most_common, count = max(((sub, sub.count) for sub in group), key=itemgetter(1))
 			rows.append(
 				{
-					'player': group['player_name'].iloc[0],
-					'username': name,
+					'player': name,
 					'num_pics': n_pics,
-					'usage': most_common['count'],
-					'geometry': most_common.geometry,
+					'usage': count,
+					'first_used': most_common.earliest_known,
+					'last_used': most_common.latest_known,
+					'game_names': most_common.game_names,
+					'geometry': most_common.point,
 				}
 			)
 
