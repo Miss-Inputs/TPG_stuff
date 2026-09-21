@@ -249,7 +249,6 @@ async def main() -> None:
 		unit='box' if use_boxes else 'point',
 	) as t:
 		for index, geom in t:
-			t.set_postfix(index=index, point=geom.representative_point())
 			result, left_best_pic, right_best_pic = get_winner(geom, left_player, right_player)
 			if result == 'left':
 				colour = args.left_colour
