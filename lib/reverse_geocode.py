@@ -57,7 +57,7 @@ def reverse_geocode_gadm(
 
 	Arguments:
 		points: PointSet
-		depth: How many levels of GADM to return, starting at 0
+		depth: How many levels of GADM to return, starting at 0 and ending at 3
 		gadm_levels: GADM levels that have already been loaded
 		settings: Settings if initialized elsewhere, otherwise they will be loaded from defaults or environment etc
 
@@ -111,7 +111,7 @@ def reverse_geocode_gadm_address(
 	depth: int,
 	gadm_levels: dict[int, 'GeoDataFrame | None'],
 	settings: Settings | None = None,
-):
+) -> pandas.Series:
 	"""Reverse geocodes using one layer of GADM for all points."""
 	df = reverse_geocode_gadm(points, depth, gadm_levels, settings)
 	df = df.iloc[:, ::-1]

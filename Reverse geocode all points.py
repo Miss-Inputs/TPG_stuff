@@ -18,6 +18,8 @@ from travelpygame import PointSet, output_geodataframe
 from travelpygame.reverse_geocode import get_address_components_nominatim, get_address_nominatim
 
 from lib.io_utils import load_point_set_from_arg
+from lib.reverse_geocode import reverse_geocode_gadm_address
+from lib.settings import Settings
 
 if TYPE_CHECKING:
 	from shapely.geometry.base import BaseGeometry
@@ -121,9 +123,9 @@ async def main() -> None:
 	)
 	argparser.add_argument(
 		'--mode',
-		choices=('address', 'components', 'null'),
+		choices=('address', 'components', 'gadm', 'null'),
 		default='address',
-		help='Can be address (default) to get the address, components to add each individual component of the address (country/state/etc) as columns, or null to skip reverse geocoding and just copy the point set',
+		help='Can be address (default) to get the address, components to add each individual component of the address (country/state/etc) as columns, gadm to use GADM if configured in settings (a bit janky for now), or null to skip reverse geocoding and just copy the point set',
 	)
 	output_args.add_argument(
 		'--output-path',
@@ -163,7 +165,7 @@ async def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 
-	# TODO: We want an option here to reverse geocode locally from a geofile, using GADM or whatever else the user passes in (though using the stuff in settings could be handy)
+	# TODO: We want an option here to reverse geocode locally from a geofile (would need a name column option too)
 
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
@@ -176,6 +178,13 @@ async def main() -> None:
 		addresses = await get_addresses(point_set, args.endpoint, args.language, parallel=False)
 		print(addresses)
 		gdf[args.column_name] = addresses
+	elif args.mode == 'gadm':
+		addresses = await asyncio.to_thread(
+			reverse_geocode_gadm_address, point_set, 3, {}, Settings()
+		)
+		print(addresses)
+		gdf[args.column_name] = addresses
+		# TODO: Mode for GADM components, I guess
 	elif args.mode == 'components':
 		components = await get_components(point_set, args.endpoint, args.language)
 		print(components)
@@ -183,6 +192,7 @@ async def main() -> None:
 		assert isinstance(gdf, GeoDataFrame), f'why is gdf {type(gdf)}'
 
 	if output_path:
+		# TODO: index=True if and only if the original file had a non-default index
 		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
 
 
