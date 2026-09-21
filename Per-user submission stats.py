@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from argparse import ArgumentParser, BooleanOptionalAction
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,14 +15,13 @@ import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.point_set_stats import get_point_set_stats
-from travelpygame.tpg_api import get_session
-from travelpygame.tpg_data import PlayerName, get_player_display_names
 from travelpygame.util import format_dataframe, format_point, geod_distance, wgs84_geod
 
 from lib.io_utils import load_or_fetch_point_sets
 
 if TYPE_CHECKING:
 	from travelpygame.point_set import PointSet
+	from travelpygame.tpg_data import PlayerName
 
 
 @dataclass
@@ -52,14 +51,11 @@ def get_concave_hull_info(point_set: 'PointSet'):
 	return HullInfo(hull, area, perimeter)
 
 
-def get_stats(
-	point_sets: Collection['PointSet'], player_names: Mapping[str, str], *, find_furthest: bool
-) -> pandas.DataFrame:
+def get_stats(point_sets: Collection['PointSet'], *, find_furthest: bool) -> pandas.DataFrame:
 	data: dict[PlayerName, dict[str, Any]] = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
 		for point_set in t:
-			name = player_names.get(point_set.name, point_set.name)
-			t.set_postfix(name=name)
+			t.set_postfix(name=point_set.name)
 			# TODO: A lot more parameters should be optional
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
 			# TODO: Some things are not in PointSetStats yet: anti-centroid (antipode of centroid), concave hull perimeter; if you care that much
@@ -72,7 +68,7 @@ def get_stats(
 			)
 			row: dict[str, Any] = {'count': point_set.count, **asdict(stats)}
 
-			data[name] = row
+			data[point_set.name] = row
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
 	# These columns contain index labels, which are generic in this case so we don't want to look at that
@@ -112,14 +108,12 @@ async def main() -> None:
 
 	threshold: int | None = args.threshold
 
-	async with get_session() as sesh:
-		# Maybe should use aliases, I dunno
-		all_point_sets = await load_or_fetch_point_sets(path)
-		player_names = await get_player_display_names(sesh)
+	# Maybe should use aliases, I dunno
+	all_point_sets = await load_or_fetch_point_sets(path)
 
 	point_sets = [ps for ps in all_point_sets if threshold is None or ps.count >= threshold]
 
-	stats = get_stats(point_sets, player_names, find_furthest=args.find_furthest_points)
+	stats = get_stats(point_sets, find_furthest=args.find_furthest_points)
 	# I should make these paths configurable but I didn't and haven't, and should
 	stats.to_csv('/tmp/stats.csv', index=False)
 	# TODO: Yeah nah westmost/etc nw_most/etc need to be split up
