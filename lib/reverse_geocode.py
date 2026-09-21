@@ -31,7 +31,9 @@ def _get_gadm_settings_paths(settings: Settings | None) -> dict[int, Path | None
 	}
 
 
-@cache
+_read_gdf_cached = cache(read_geodataframe)
+
+
 def _load_gadm(
 	level: int, paths: Mapping[int, Path | None], levels: Mapping[int, 'GeoDataFrame | None']
 ) -> 'GeoDataFrame | None':
@@ -40,7 +42,7 @@ def _load_gadm(
 		return gadm
 	path = paths.get(level)
 	if path is not None:
-		return read_geodataframe(path)
+		return _read_gdf_cached(path)
 	return None
 
 
@@ -67,7 +69,7 @@ def reverse_geocode_gadm(
 	paths = _get_gadm_settings_paths(settings)
 	results: list[pandas.DataFrame] = []
 	for i in range(depth):
-		gadm_level = _load_gadm(paths, gadm_levels)
+		gadm_level = _load_gadm(i, paths, gadm_levels)
 		if gadm_level is None:
 			logger.info(
 				'Wanted to reverse geocode %s using GADM, but level %d is not configured',

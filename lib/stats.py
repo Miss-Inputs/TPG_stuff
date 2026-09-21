@@ -27,9 +27,9 @@ def get_longest_distance_from_point(poly: Polygon | MultiPolygon, point: Point):
 	distances = [[v, point.distance(v)] for v in vertices]
 	df = pandas.DataFrame(distances, columns=['point', 'distance'])
 	idxmax = df['distance'].idxmax()
-	antipoint = df.loc[idxmax, 'point']
+	antipoint = df.loc[idxmax, 'point']  # ty: ignore[invalid-argument-type]
 	assert isinstance(antipoint, Point), f'antipoint is {type(antipoint)}, not Point'
-	max_dist = df.loc[idxmax, 'distance']
+	max_dist = df.loc[idxmax, 'distance']  # ty: ignore[invalid-argument-type]
 	if isinstance(max_dist, numpy.floating):
 		max_dist = max_dist.item()
 	assert isinstance(max_dist, float), f'max_dist is {type(max_dist)}, not float'
