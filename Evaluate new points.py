@@ -164,7 +164,7 @@ async def eval_with_targets(
 		await asyncio.to_thread(output_dataframe, diffs, output_path)
 
 
-def _get_point_name(current_points: PointSet, current_diff: SubmissionDifference):
+def _get_point_name(current_points: PointSet, current_diff: SubmissionDifference) -> str:
 	index = find_first_geom_index(current_points.points, current_diff.player_pic)
 	if isinstance(index, str):
 		return index

@@ -7,7 +7,7 @@ import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import geopandas
 from shapely import Point
@@ -25,7 +25,9 @@ logger = logging.getLogger(Path(__file__).stem)
 ItemType = tuple[Hashable, Point]
 
 
-def get_row_midpoint(item_1: ItemType, item_2: ItemType, *, use_sphere_method: bool):
+def get_row_midpoint(
+	item_1: ItemType, item_2: ItemType, *, use_sphere_method: bool
+) -> dict[str, Any]:
 	name_1, point_1 = item_1
 	name_2, point_2 = item_2
 	midpoint = (
@@ -37,7 +39,7 @@ def get_row_midpoint(item_1: ItemType, item_2: ItemType, *, use_sphere_method: b
 	return {'geometry': midpoint, 'name': name}
 
 
-def _ensure_only_points(point_set: 'PointSet'):
+def _ensure_only_points(point_set: 'PointSet') -> list[ItemType]:
 	a: list[ItemType] = []
 	for name, point in point_set.points.items():
 		if not isinstance(point, Point):

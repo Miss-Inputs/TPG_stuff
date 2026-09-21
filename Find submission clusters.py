@@ -35,21 +35,22 @@ def add_cluster_info(gdf: GeoDataFrame, threshold: float):
 	gdf.loc[gdf['cluster_id'].isin(single_clusters), 'cluster_id'] = None
 
 
-def _cluster_groupby_sort_key(kv: tuple[Hashable, 'DataFrame']):
+def _cluster_groupby_sort_key(kv: tuple[Hashable, 'DataFrame']) -> float:
 	cluster_size = kv[1].iloc[0]['cluster_size']
 	if not isinstance(cluster_size, (float, int)):
 		cluster_size = cluster_size.item()
 	return cluster_size
 
 
-def _self_cartesian_key(kv: tuple[Hashable, dict[Hashable, float]]):
+def _self_cartesian_key(kv: tuple[Hashable, dict[Hashable, float]]) -> float:
 	return sum(kv[1].values())
 
 
 def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataFrame:
 	groupby = gdf.groupby('cluster_id', dropna=True)
 	rows = []
-	have_player_name_col = 'player_name' in gdf.columns
+	have_player_name_col = 'player' in gdf.columns
+	geom_col = gdf.active_geometry_name or 'geometry'
 	for cluster_id, cluster in sorted(groupby, key=_cluster_groupby_sort_key):
 		assert isinstance(cluster, GeoDataFrame), (
 			f'Somehow cluster group was {type(cluster)} and not GeoDataFrame'
@@ -57,13 +58,13 @@ def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataF
 		n = cluster.iloc[0]['cluster_size']
 		distances = self_cartesian_product_distances(cluster.geometry)
 		centre_index = min(distances.items(), key=_self_cartesian_key)[0]
-		centre = cluster.loc[centre_index, 'geometry']  # ty:ignore[invalid-argument-type]
+		centre = cluster.loc[centre_index, geom_col]  # ty:ignore[invalid-argument-type]
 		furthest_index, furthest_dist = max(distances[centre_index].items(), key=itemgetter(1))
-		furthest_point = cluster.loc[furthest_index, 'geometry']  # ty:ignore[invalid-argument-type]
+		furthest_point = cluster.loc[furthest_index, geom_col]  # ty:ignore[invalid-argument-type]
 
 		# Could have option to use closest_to_corners to get centre, but it's not that important and just for informational purposes
 		if have_player_name_col:
-			player_names = cluster['player_name'].dropna().unique()
+			player_names = cluster['player'].dropna().unique()
 			n_players = player_names.size
 		else:
 			player_names = None
@@ -84,9 +85,9 @@ def get_cluster_info(gdf: GeoDataFrame, *, print_stuff: bool = True) -> GeoDataF
 			print(f'Cluster {cluster_id}: {n} items')
 			for index, row in cluster.iterrows():
 				if have_player_name_col:
-					print(row['player_name'], '@', format_point(row['geometry']))
+					print(row['player'], '@', format_point(row[geom_col]))
 				else:
-					print(f'{index}:', format_point(row['geometry']))
+					print(f'{index}:', format_point(row[geom_col]))
 			print('Centre:', format_point(centre))
 			print(
 				'Furthest from centre:',

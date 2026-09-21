@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 	from pandas import Series
 
 
-def _join_unique(s: 'Series', joiner: str = ', '):
+def _join_unique(s: 'Series', joiner: str = ', ') -> str:
 	return joiner.join(str(item) for item in s.dropna().unique())
 
 
