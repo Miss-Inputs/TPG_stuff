@@ -8,9 +8,11 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path, PurePath
+from typing import TYPE_CHECKING
 
 import shapely
 from pandas import DataFrame, Index, RangeIndex
+from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import PointSet, validate_points
 from travelpygame.random_points import random_point_in_bbox, random_points_in_poly
@@ -38,6 +40,9 @@ from travelpygame.util import (
 
 from lib.io_utils import load_or_fetch_point_sets, load_point_sets_from_folder
 from lib.settings import Settings
+
+if TYPE_CHECKING:
+	from geopandas import GeoDataFrame
 
 
 def compare_rounds(old_round: Round, new_round: Round, name: str | None):
@@ -72,7 +77,7 @@ def get_simulation(
 	strategy: SimulatedStrategy,
 	targets_path: Path | None,
 	num_random_rounds: int | None,
-	region_path: Path | None,
+	region: 'GeoDataFrame | None',
 	single_point: shapely.Point | None,
 	distance_method: DistanceMethod,
 ) -> Simulation:
@@ -93,8 +98,7 @@ def get_simulation(
 			if isinstance(point, shapely.Point)
 		}
 	elif num_random_rounds:
-		if region_path:
-			region = read_geodataframe(region_path)
+		if region is not None:
 			# TODO: This wants a random seed argument
 			points = random_points_in_poly(
 				region, num_random_rounds, use_tqdm=True, desc='Generating random points'
@@ -169,6 +173,7 @@ async def load_point_sets(
 	points_path: Path | None,
 	threshold: int | None,
 	datetime_threshold: datetime | None,
+	region: 'GeoDataFrame | None',
 	additional_folders: list[Path] | None,
 	additional_players_args: list[list[str]] | None,
 	*,
@@ -198,6 +203,14 @@ async def load_point_sets(
 		for additional_name, path in additional_players_args:
 			point_set = await asyncio.to_thread(load_with_auto_index, path, additional_name)
 			point_sets.append(point_set)
+
+	if region is not None:
+		# I feel like this could be vectorized, oh well
+		point_sets = [
+			ps
+			for ps in tqdm(point_sets, desc='Checking for point sets containing region')
+			if region.intersects(ps.multipoint).any()
+		]
 
 	if not point_sets:
 		raise RuntimeError('Nobody is able to be simulated')
@@ -346,6 +359,12 @@ def main() -> None:
 		help='Only simulate players who have known submissions at least after this date (YYYY-MM-DD format only, no being weird allowed). This can help speed up the simulation',
 	)
 	player_args.add_argument(
+		'--only-in-region',
+		action='store_true',
+		help='Only simulate players who have known pics inside the region specified by --region. This can help speed up the simulation',
+	)
+
+	player_args.add_argument(
 		'--add-from-folder',
 		'--add-from-directory',
 		action='append',
@@ -391,26 +410,30 @@ def main() -> None:
 	# TODO: Use main TPG data for existing_rounds by default
 	existing_rounds = load_rounds(rounds_path) if rounds_path else None
 
+	region = read_geodataframe(region_path) if region_path else None
+
 	# TODO: (Optionally) get players from existing_rounds
-	point_set = asyncio.run(
+	point_sets = asyncio.run(
 		load_point_sets(
 			name,
 			points_path,
 			args.threshold,
 			args.date_threshold,
+			region if args.only_in_region else None,
 			args.add_from_folder,
 			args.add_player,
 			load_per_user=args.load_per_player_submissions,
 		)
 	)
+	print(f'{len(point_sets)} simulated players')
 	simulation = get_simulation(
 		existing_rounds,
-		point_set,
+		point_sets,
 		scoring,
 		strategy,
 		targets_path,
 		num_random_points,
-		region_path,
+		region,
 		args.point,
 		distance_method,
 	)
