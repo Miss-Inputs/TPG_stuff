@@ -172,9 +172,6 @@ async def load_point_sets(
 	*,
 	load_per_user: bool,
 ) -> list[PointSet]:
-	# TODO: This needs quite a bit of refactoring, seems we've been indecisive about what we're doing with it
-	# Like I'm not sure point_sets_by_name should be there because right now we're always just passing None, but maybe we were going to do something and now I don't know
-
 	settings = Settings()
 	point_sets = (
 		await load_or_fetch_point_sets(settings, min_count=threshold) if load_per_user else []
@@ -186,6 +183,7 @@ async def load_point_sets(
 			)
 		else:
 			# TODO: Perchance we want to combine the points rather than replace them (for example, a 5K might be just a submission and not something one keeps track of in the point set)
+			point_sets = [ps for ps in point_sets if ps.name != name]
 			point_sets.append(await asyncio.to_thread(load_with_auto_index, points_path, name))
 
 	if additional_folders:
