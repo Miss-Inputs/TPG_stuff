@@ -13,6 +13,7 @@ import geopandas
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame.util import format_dataframe
 from travelpygame.util.distance import DistanceMethod, cartesian_product_distances
 from travelpygame.util.io_utils import output_geodataframe
 
@@ -37,7 +38,7 @@ def get_unique_pics(
 			assert isinstance(group, geopandas.GeoDataFrame), (
 				f'group is {type(group)}, not GeoDataFrame'
 			)
-			t.set_postfix(name=name)
+			# t.set_postfix(name=name)
 			n_pics = group.index.size
 			if n_pics < threshold:
 				continue
@@ -98,13 +99,23 @@ async def main() -> None:
 	output_path: Path | None = args.output_path
 	distance_method = DistanceMethod(args.distance_method)
 
-	subs_path = Settings().submission_summary_path
-	subs = await load_or_fetch_submission_summary(subs_path)
+	settings = Settings()
+	# TODO: Have this be an argument instead
+	subs_path = settings.submission_summary_path
+	subs = await load_or_fetch_submission_summary(
+		subs_path, settings.tpg_export_path, aliases_path=settings.aliases_path
+	)
 	# Do NOT even think about trying to use self_cartesian_product_distances(subs.geometry) to just get vectorized distances all at once. You will accomplish nothing except rendering your computer inoperable for 20 minutes while it runs out of memory and thrashes. Do it whatever the other way is.
 
 	gdf = get_unique_pics(subs, args.threshold, distance_method)
 	gdf = gdf.sort_values('closest_distance', ascending=False)
-	print(gdf)
+	print(
+		format_dataframe(
+			gdf,
+			distance_cols={'mean_dist_to_other', 'median_dist_to_other', 'closest_distance'},
+			point_cols={'point'},
+		)
+	)
 	if output_path:
 		# TODO: Also just have something that gets max(closest_distance) per player
 		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)

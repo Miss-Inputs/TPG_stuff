@@ -46,8 +46,11 @@ async def main() -> None:
 	settings = Settings()
 	subs_path = settings.submission_summary_path
 	tpg_export_path = settings.tpg_export_path
+	aliases_path = settings.aliases_path
 
-	sub_data = await load_or_fetch_submission_summary(subs_path, tpg_export_path, forbid_extra=True)
+	sub_data = await load_or_fetch_submission_summary(
+		subs_path, tpg_export_path, aliases_path=aliases_path, forbid_extra=True
+	)
 
 	rows = []
 	for name, group in sub_data.per_player.items():

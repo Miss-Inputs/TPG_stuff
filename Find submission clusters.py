@@ -139,7 +139,9 @@ def main() -> None:
 	else:
 		summary = asyncio.run(
 			load_or_fetch_submission_summary(
-				settings.submission_summary_path, settings.tpg_export_path
+				settings.submission_summary_path,
+				settings.tpg_export_path,
+				aliases_path=settings.aliases_path,
 			)
 		)
 		gdf = GeoDataFrame(summary.submissions, geometry='point', crs='wgs84')

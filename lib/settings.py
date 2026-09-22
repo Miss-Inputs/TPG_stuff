@@ -20,5 +20,7 @@ class Settings(BaseSettings, extra='allow'):
 	"""Path to save summary of all known submissions by all players"""
 	tpg_export_path: Path | None = None
 	"""Path (or path pattern with {} as a wildcard, e.g. tpg-tracker-{}.geojson) with exported TPG tracker data from Cellery's site, as GeoJSON"""
+	aliases_path: Path | None = None
+	"""Path (csv/ods/etc) to file with columns "name" and "alias" that map player names when loading TPG tracker export"""
 	tpg_wrapped_output_path: Path | None = None
 	"""Folder to save all TPG wrapped output"""

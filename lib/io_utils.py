@@ -10,7 +10,7 @@ import shapely
 from async_lru import alru_cache
 from pyproj import CRS
 from tqdm.auto import tqdm
-from travelpygame import PointSet, validate_points
+from travelpygame.point_set import PointSet, validate_points
 from travelpygame.submission_data import (
 	AllSubmissionData,
 	SubmissionSummary,
@@ -24,6 +24,7 @@ from travelpygame.util import (
 	load_points,
 	load_points_async,
 	maybe_set_index_name_col,
+	read_dataframe,
 	read_geodataframe,
 	try_auto_set_index,
 )
@@ -33,7 +34,7 @@ from .settings import Settings
 
 if TYPE_CHECKING:
 	from geopandas import GeoDataFrame
-	from travelpygame.tpg_data import PlayerUsername
+	from travelpygame.tpg_data import PlayerName, PlayerUsername
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,27 @@ def latest_file_matching_format_pattern(path: Path) -> Path:
 	return max(path.parent.glob(path.name.replace('{}', '*')))
 
 
+def load_aliases(path: Path | Settings | None) -> dict['PlayerName', 'PlayerName']:
+	if isinstance(path, Settings):
+		path = path.aliases_path
+	if path is None:
+		return {}
+	df = read_dataframe(path)
+	if 'name' not in df.columns or 'alias' not in df.columns:
+		logger.info(
+			'Could not load alias file %s, missing name/alias columns. Columns found were: %s',
+			path,
+			df.columns,
+		)
+		return {}
+	return df.set_index('alias')['name'].to_dict()  # ty: ignore[invalid-return-type] #trust me bro
+
+
 @alru_cache
 async def get_all_submission_data(
 	cellery_export_path_pattern: Path | None,
 	rounding: int | None = 6,
+	aliases_path: Path | None = None,
 	*,
 	forbid_extra: bool = False,
 ) -> AllSubmissionData:
@@ -66,7 +84,8 @@ async def get_all_submission_data(
 		except ValueError:
 			pass
 		else:
-			return await convert_cellery_geojson(path, rounding, forbid_extra=forbid_extra)
+			aliases = await asyncio.to_thread(load_aliases, aliases_path)
+			return await convert_cellery_geojson(path, rounding, aliases, forbid_extra=forbid_extra)
 	logger.info('No TPG tracker export found, using official TPG only')
 	return await get_all_official_data(rounding, forbid_extra=forbid_extra)
 
@@ -74,11 +93,12 @@ async def get_all_submission_data(
 async def get_submission_summary(
 	cellery_export_path_pattern: Path | None,
 	rounding: int | None = 6,
+	aliases_path: Path | None = None,
 	*,
 	forbid_extra: bool = False,
 ) -> SubmissionSummary:
 	data = await get_all_submission_data(
-		cellery_export_path_pattern, rounding, forbid_extra=forbid_extra
+		cellery_export_path_pattern, rounding, aliases_path, forbid_extra=forbid_extra
 	)
 	return SubmissionSummary(data.grouped_submissions)
 
@@ -87,6 +107,7 @@ async def load_or_fetch_submission_summary(
 	path: Path | None,
 	cellery_export_path_pattern: Path | None = None,
 	rounding: int | None = 6,
+	aliases_path: Path | None = None,
 	*,
 	forbid_extra: bool = False,
 ) -> SubmissionSummary:
@@ -98,7 +119,7 @@ async def load_or_fetch_submission_summary(
 			pass
 
 	sub_summary = await get_submission_summary(
-		cellery_export_path_pattern, rounding, forbid_extra=forbid_extra
+		cellery_export_path_pattern, rounding, aliases_path, forbid_extra=forbid_extra
 	)
 	if path:
 		await asyncio.to_thread(sub_summary.save_to_file, path)
@@ -112,11 +133,15 @@ async def load_or_fetch_point_sets(
 ) -> list[PointSet]:
 	if isinstance(path, Path):
 		export_path = None
+		aliases_path = None
 	else:
 		settings = path or Settings()
 		path = settings.submission_summary_path
 		export_path = settings.tpg_export_path
-	summary = await load_or_fetch_submission_summary(path, export_path, forbid_extra=True)
+		aliases_path = settings.aliases_path
+	summary = await load_or_fetch_submission_summary(
+		path, export_path, aliases_path=aliases_path, forbid_extra=True
+	)
 	return get_all_point_sets(summary.per_player, min_datetime, min_count)
 
 
