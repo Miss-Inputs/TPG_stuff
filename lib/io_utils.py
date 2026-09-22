@@ -105,7 +105,6 @@ async def load_or_fetch_submission_summary(
 	return sub_summary
 
 
-@alru_cache(maxsize=1)
 async def load_or_fetch_point_sets(
 	path: Path | Settings | None = None,
 	min_datetime: datetime | None = None,
