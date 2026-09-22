@@ -6,6 +6,7 @@ import logging
 import re
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection
+from datetime import datetime
 from pathlib import Path, PurePath
 
 import shapely
@@ -167,6 +168,7 @@ async def load_point_sets(
 	name: PlayerName | None,
 	points_path: Path | None,
 	threshold: int | None,
+	datetime_threshold: datetime | None,
 	additional_folders: list[Path] | None,
 	additional_players_args: list[list[str]] | None,
 	*,
@@ -174,7 +176,9 @@ async def load_point_sets(
 ) -> list[PointSet]:
 	settings = Settings()
 	point_sets = (
-		await load_or_fetch_point_sets(settings, min_count=threshold) if load_per_user else []
+		await load_or_fetch_point_sets(settings, datetime_threshold, threshold)
+		if load_per_user
+		else []
 	)
 	if points_path:
 		if not name:
@@ -200,7 +204,7 @@ async def load_point_sets(
 	return point_sets
 
 
-def parse_coords(s: str) -> shapely.Point | None:
+def parse_coords(s: str) -> shapely.Point:
 	lat_s, lng_s = re.split(r'[,\s/;]\s*', s, maxsplit=1)
 	lat = float(lat_s)
 	lng = float(lng_s)
@@ -336,6 +340,12 @@ def main() -> None:
 		help='Only simulate players who have submitted at least this amount of pics. This can help speed up the simulation',
 	)
 	player_args.add_argument(
+		'--date-threshold',
+		'--min-date',
+		type=datetime.fromisoformat,
+		help='Only simulate players who have known submissions at least after this date (YYYY-MM-DD format only, no being weird allowed). This can help speed up the simulation',
+	)
+	player_args.add_argument(
 		'--add-from-folder',
 		'--add-from-directory',
 		action='append',
@@ -387,6 +397,7 @@ def main() -> None:
 			name,
 			points_path,
 			args.threshold,
+			args.date_threshold,
 			args.add_from_folder,
 			args.add_player,
 			load_per_user=args.load_per_player_submissions,
