@@ -179,7 +179,7 @@ async def load_point_sets(
 
 	settings = Settings()
 	point_sets = (
-		await load_or_fetch_point_sets(settings, minimum_count=threshold) if load_per_user else []
+		await load_or_fetch_point_sets(settings, min_count=threshold) if load_per_user else []
 	)
 	if points_path:
 		if not name:
