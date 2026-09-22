@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Find points that are as far away as possible from any submission by anyone."""
+"""Find points that are as far away as possible from anywhere that anyone has ever submitted.
+Uses haversine for main TPG consistency.
+"""
+# TODO: Load point sets instead of only loading main TPG
 
 import asyncio
 import logging
@@ -14,7 +17,7 @@ import pandas
 from tqdm.auto import tqdm
 from travelpygame import get_main_tpg_rounds_with_path, load_rounds
 from travelpygame.point_set_stats import find_furthest_point
-from travelpygame.util import format_distance, format_point, output_geodataframe
+from travelpygame.util import DistanceMethod, format_distance, format_point, output_geodataframe
 
 from lib.io_utils import load_polygons
 from lib.settings import Settings
@@ -88,7 +91,7 @@ def main() -> None:
 		while True:
 			points = numpy.append(all_points, numpy.asarray(found))
 			point, distance = find_furthest_point(
-				points, polygon=region, use_tqdm=False, use_haversine=True
+				points, polygon=region, use_tqdm=False, distance_method=DistanceMethod.Haversine
 			)
 			if distance <= threshold:
 				break

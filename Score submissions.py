@@ -13,14 +13,14 @@ from travelpygame import (
 	rounds_to_json,
 )
 from travelpygame.scoring import detect_likely_ties, make_leaderboards, score_round
-from travelpygame.util import format_distance, get_distances
+from travelpygame.util import DistanceMethod, format_distance, get_distances
 
 
-def _round_number_getter(r: Round):
+def _round_number_getter(r: Round) -> int:
 	return r.number
 
 
-def set_ties(rounds: list[Round], tie_threshold: float | None, *, use_haversine: bool):
+def set_ties(rounds: list[Round], tie_threshold: float | None, distance_method: DistanceMethod):
 	if not tie_threshold:
 		return
 	# We also could have an option to just print likely ties instead of setting is_tie automatically
@@ -28,7 +28,7 @@ def set_ties(rounds: list[Round], tie_threshold: float | None, *, use_haversine:
 	for r in rounds:
 		# detect_likely_ties requires distances first
 		points = [sub.point for sub in r.submissions]
-		distances = get_distances(r.target, points, use_haversine=use_haversine)
+		distances = get_distances(r.target, points, distance_method)
 		for i, s in enumerate(r.submissions):
 			s.distance = distances[i].item()
 
@@ -46,10 +46,10 @@ def load_scored_rounds(
 	options: ScoringOptions,
 	fivek_threshold: float | None,
 	tie_threshold: float | None,
+	distance_method: DistanceMethod,
 	*,
 	bonus_points_in_names: bool,
-	use_haversine: bool,
-):
+) -> list[Round]:
 	rounds: list[Round] = []
 	last_round_num = 0
 	for path in paths:
@@ -65,9 +65,9 @@ def load_scored_rounds(
 		last_round_num = max(r.number for r in loaded)
 		rounds += loaded
 	rounds.sort(key=_round_number_getter)
-	set_ties(rounds, tie_threshold, use_haversine=use_haversine)
+	set_ties(rounds, tie_threshold, distance_method)
 	return [
-		r if r.is_scored else score_round(r, options, fivek_threshold, use_haversine=use_haversine)
+		r if r.is_scored else score_round(r, options, distance_method, fivek_threshold)
 		for r in rounds
 	]
 
@@ -122,11 +122,11 @@ def main() -> None:
 		help='Threshold in metres for a submission being close enough to be considered a 5K, used for calculating scoring, defaults to 100m. 0 to disable',
 		default=100,
 	)
-	scoring_args.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		help='Use haversine instead of WGS geod for scoring (less accurate as it assumes the earth is a sphere, but more consistent with other TPG things), defaults to True',
-		default=True,
+	argparser.add_argument(
+		'--distance-method',
+		choices=DistanceMethod,
+		default='haversine',
+		help='Distance method, defaults to haversine for consistency',
 	)
 	scoring_args.add_argument(
 		'--clip-negative',
@@ -158,6 +158,7 @@ def main() -> None:
 
 	args = argparser.parse_args()
 
+	distance_method = DistanceMethod(args.distance_method)
 	output_path: Path | None = args.output_path
 	reminder_list_path: Path | None = args.reminder_list
 	reminder_list = (
@@ -181,8 +182,8 @@ def main() -> None:
 		options,
 		args.fivek_threshold,
 		args.tie_detection_threshold,
+		distance_method,
 		bonus_points_in_names=args.bonus_points_in_names,
-		use_haversine=args.use_haversine,
 	)
 
 	if output_path:

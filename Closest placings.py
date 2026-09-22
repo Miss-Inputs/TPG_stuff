@@ -14,6 +14,7 @@ from shapely import Point
 from travelpygame import Round, get_main_tpg_rounds_with_path, load_rounds, output_geodataframe
 from travelpygame.submission_comparison import find_next_highest_placing
 from travelpygame.util import (
+	DistanceMethod,
 	format_dataframe,
 	format_xy,
 	geod_distance_and_bearing,
@@ -25,7 +26,7 @@ from lib.settings import Settings
 
 
 def get_closest_placings(
-	rounds: list[Round], name: str, *, use_haversine: bool = True, project_forward: bool = True
+	rounds: list[Round], name: str, distance_method: DistanceMethod, *, project_forward: bool = True
 ) -> pandas.DataFrame:
 	rows = []
 	for r in rounds:
@@ -34,7 +35,7 @@ def get_closest_placings(
 		except StopIteration:
 			# We did not submit for this round, and that's okay
 			continue
-		rival_diff = find_next_highest_placing(r, player_submission, use_haversine=use_haversine)
+		rival_diff = find_next_highest_placing(r, player_submission, distance_method)
 		if rival_diff is None:
 			# We won! That's certainly okay
 			continue
@@ -69,7 +70,7 @@ def get_closest_placings(
 def main() -> None:
 	if 'debugpy' in sys.modules:
 		name = 'Miss Inputs 🐈'
-		use_haversine = True
+		distance_method = DistanceMethod.Haversine
 		rounds_path = None
 		project_forward = True
 		output_path = None
@@ -82,10 +83,10 @@ def main() -> None:
 			help='Path to JSON containing rounds/submissions data, or use main TPG if not specified',
 		)
 		argparser.add_argument(
-			'--haversine',
-			action=BooleanOptionalAction,
-			help='Use haversine instead of geodetic distance, defaults to true',
-			default=True,
+			'--distance-method',
+			choices=DistanceMethod,
+			default='geodetic',
+			help='Distance method, defaults to geodetic',
 		)
 		argparser.add_argument(
 			'--project-forward',
@@ -99,7 +100,7 @@ def main() -> None:
 			help='Path to save results as CSV. If using --project-forward, this can also be GeoJSON/gpkg/etc',
 		)
 		args = argparser.parse_args()
-		use_haversine: bool = args.haversine
+		distance_method = DistanceMethod(args.distance_method)
 		project_forward: bool = args.project_forward
 		name = args.name
 		rounds_path: Path | None = args.rounds_path
@@ -111,9 +112,7 @@ def main() -> None:
 		if rounds_path
 		else asyncio.run(get_main_tpg_rounds_with_path(settings.main_tpg_data_path))
 	)
-	df = get_closest_placings(
-		rounds, name, use_haversine=use_haversine, project_forward=project_forward
-	)
+	df = get_closest_placings(rounds, name, distance_method, project_forward=project_forward)
 	if output_path:
 		if project_forward:
 			output_geodataframe(

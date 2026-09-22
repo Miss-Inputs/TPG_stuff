@@ -11,6 +11,7 @@ import geopandas
 from matplotlib import pyplot
 from shapely import Point
 from tqdm.auto import tqdm
+from travelpygame.util import DistanceMethod
 from travelpygame.util.formatting import format_distance
 from travelpygame.util.point_construction import get_fixed_box_grid, get_fixed_grid
 
@@ -96,10 +97,10 @@ def main() -> None:
 	)
 
 	argparser.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		default=False,
-		help='Use haversine distance instead of geodesic distance, defaults to false.',
+		'--distance-method',
+		choices=DistanceMethod,
+		default='geodetic',
+		help='Distance method, defaults to geodetic',
 	)
 	plot_args_group.add_argument(
 		'--cmap',
@@ -140,6 +141,7 @@ def main() -> None:
 		)
 	)
 
+	distance_method = DistanceMethod(args.distance_method)
 	use_boxes: bool = args.use_boxes
 	resolution: float = args.resolution
 	grid = get_grid(
@@ -158,9 +160,7 @@ def main() -> None:
 			point = geom if isinstance(geom, Point) else geom.representative_point()
 			# This seems wrong, since we already know it's a box and what it is and we should get the exact middle of the box, maybe? But representative_point seems to return that for rectangles already
 			t.set_postfix(index=index, point=point)
-			best_pic, distance = point_set.get_closest_index(
-				point, use_haversine=args.use_haversine
-			)
+			best_pic, distance = point_set.get_closest_index(point, distance_method)
 			distances[index] = distance
 			best_pics[index] = best_pic
 

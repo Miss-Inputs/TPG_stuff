@@ -23,6 +23,7 @@ from travelpygame.simulation import (
 )
 from travelpygame.tpg_data import PlayerName, Round, ScoringOptions, load_rounds, rounds_to_json
 from travelpygame.util import (
+	DistanceMethod,
 	format_dataframe,
 	format_distance,
 	format_point,
@@ -72,8 +73,7 @@ def get_simulation(
 	num_random_rounds: int | None,
 	region_path: Path | None,
 	single_point: shapely.Point | None,
-	*,
-	use_haversine: bool,
+	distance_method: DistanceMethod,
 ) -> Simulation:
 	rounds: dict[str, shapely.Point] = {}
 	order: dict[str, int] = {}
@@ -105,9 +105,7 @@ def get_simulation(
 		rounds = {format_point(single_point): single_point}
 	else:
 		raise RuntimeError('You have no rounds to be simulated')
-	return Simulation(
-		rounds, order or None, point_sets, scoring, strategy, use_haversine=use_haversine
-	)
+	return Simulation(rounds, order or None, point_sets, scoring, strategy, distance_method)
 
 
 def output_results(
@@ -289,10 +287,10 @@ def main() -> None:
 		default='closest',
 	)
 	sim_args.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to true for consistency with main TPG',
-		default=True,
+		'--distance-method',
+		choices=DistanceMethod,
+		default='haversine',
+		help='Distance method, defaults to haversine for consistency',
 	)
 
 	output_args.add_argument(
@@ -367,6 +365,7 @@ def main() -> None:
 	targets_path: Path | None = args.targets
 	num_random_points: int | None = args.random_rounds
 	region_path: Path | None = args.region
+	distance_method = DistanceMethod(args.distance_method)
 
 	strategy = strategy_choices[args.strategy]
 	if args.custom_scoring:
@@ -404,7 +403,7 @@ def main() -> None:
 		num_random_points,
 		region_path,
 		args.point,
-		use_haversine=args.use_haversine,
+		distance_method,
 	)
 
 	player_names = {point_set.name for point_set in simulation.point_sets}

@@ -28,6 +28,7 @@ from travelpygame.submission_comparison import (
 	find_new_next_highest_distance,
 )
 from travelpygame.util import (
+	DistanceMethod,
 	find_first_geom_index,
 	format_dataframe,
 	format_distance,
@@ -42,7 +43,7 @@ from lib.io_utils import load_point_set_from_arg
 
 
 def get_distances(
-	points: PointSet, new_points: geopandas.GeoDataFrame, *, use_haversine: bool
+	points: PointSet, new_points: geopandas.GeoDataFrame, distance_method: DistanceMethod
 ) -> geopandas.GeoDataFrame:
 	"""Finds the closest point in points to each of new_points."""
 	rows = []
@@ -55,9 +56,7 @@ def get_distances(
 				raise TypeError(
 					f'new points contained {type(new_point)} at {index} instead of Point'
 				)
-			closest_index, distance = points.get_closest_index(
-				new_point, use_haversine=use_haversine
-			)
+			closest_index, distance = points.get_closest_index(new_point, distance_method)
 			rows.append(
 				{
 					'new_point': index,
@@ -75,11 +74,10 @@ def get_where_pics_better(
 	points: PointSet,
 	new_points: PointSet,
 	targets: geopandas.GeoDataFrame,
-	*,
-	use_haversine: bool = True,
+	distance_method: DistanceMethod,
 ) -> pandas.DataFrame:
 	"""Just calls new_pic_eval.find_if_new_pics_better but filters the result to only rows where the new points are better."""
-	results = find_if_new_pics_better(points, new_points, targets, use_haversine=use_haversine)
+	results = find_if_new_pics_better(points, new_points, targets, distance_method)
 	better = results[results['is_new_better']].copy().drop(columns='is_new_better')
 	better['diff'] = better['current_distance'] - better['new_distance']
 	return better.sort_values('diff', ascending=False)
@@ -112,8 +110,8 @@ async def eval_with_targets(
 	output_path: Path | None,
 	target_name_col: str | None,
 	improvement_threshold: float | None,
+	distance_method: DistanceMethod,
 	*,
-	use_haversine: bool,
 	find_if_any_pics_better: bool,
 ):
 	"""Tests which of `targets` are improved by `new_points` over `points` and outputs stuff.
@@ -122,7 +120,7 @@ async def eval_with_targets(
 	targets = await _load_targets(target_paths, target_name_col)
 
 	if find_if_any_pics_better:
-		better = get_where_pics_better(points, new_points, targets.gdf, use_haversine=use_haversine)
+		better = get_where_pics_better(points, new_points, targets.gdf, distance_method)
 		print('Number of times each pic was better (with all new pics at once):')
 		better_count = (
 			better['new_best']
@@ -138,7 +136,7 @@ async def eval_with_targets(
 			await asyncio.to_thread(output_dataframe, better, target_output_path)
 
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		points.points, targets.points, use_haversine=use_haversine
+		points.points, targets.points, distance_method
 	)
 	print(f'Worst case target: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}')
 	combined = pandas.concat([points.gdf, new_points.gdf])
@@ -146,14 +144,14 @@ async def eval_with_targets(
 		f'concat(points.gdf, new_points.gdf) resulted in {(type(combined))} and not GeoDataFrame'
 	)
 	worst_target, worst_dist, pic_for_worst = get_worst_point(
-		combined, targets.points, use_haversine=use_haversine
+		combined, targets.points, distance_method
 	)
 	print(
 		f'Worst case target after adding new pics: {worst_target}, {format_distance(worst_dist)} from {pic_for_worst}'
 	)
 
 	diffs = find_new_pics_better_individually(
-		points, new_points, targets, improvement_threshold, use_haversine=use_haversine
+		points, new_points, targets, improvement_threshold, distance_method
 	)
 	not_used = ', '.join(new_points.gdf.index.difference(diffs.index))
 	if not_used:
@@ -177,15 +175,15 @@ async def eval_with_rounds(
 	rounds_path: Path,
 	name: str,
 	output_path: Path | None,
-	*,
-	use_haversine: bool = False,
+	distance_method: DistanceMethod,
 ):
+	# TODO: Round loading should probably be outside this function, and DistanceMethod should probably be loaded from the season's scoring options if we have that
 	rounds = await load_rounds_async(rounds_path)
 	rounds.sort(key=attrgetter('number'))
 
 	rows = []
 	for r in rounds:
-		current_diff = compare_player_in_round(r, name, use_haversine=use_haversine)
+		current_diff = compare_player_in_round(r, name, distance_method)
 		if current_diff is None:
 			# We already won the round or didn't submit in in the first place
 			continue
@@ -195,7 +193,7 @@ async def eval_with_rounds(
 		current_best = _get_point_name(current_points, current_diff)
 
 		current_best_index, current_distance = current_points.get_closest_index(
-			r.target, use_haversine=use_haversine
+			r.target, distance_method
 		)
 		if current_distance < current_diff.player_distance:
 			old_best = current_best
@@ -227,7 +225,7 @@ async def eval_with_rounds(
 					current_distance,
 					new_rank,
 					str(current_best) if current_best else None,
-					use_haversine=use_haversine,
+					distance_method,
 				)
 				assert current_diff, (
 					'current_diff is now None, which should never happen as we already checked if new_rank was 1'
@@ -237,7 +235,7 @@ async def eval_with_rounds(
 		old_desc = current_best or format_point(current_diff.player_pic)
 		rival_desc = current_diff.rival_pic_description or format_point(current_diff.rival_pic)
 		for improvement in find_improvements_in_round(
-			r, name, new_points, distance, use_haversine=use_haversine
+			r, name, new_points, distance, distance_method
 		):
 			new_rank = new_distance_rank(improvement.new_distance, r)
 			if new_rank == old_rank:
@@ -329,10 +327,10 @@ async def main() -> None:
 		help='With --targets, optionally, only count improvements if the new pics improve your distance by over this amount (in km)',
 	)
 	argparser.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to true for consistency with main TPG',
-		default=True,
+		'--distance-method',
+		choices=DistanceMethod,
+		help='Distance calculation method, defaults to haversine for consistency with main TPG',
+		default='haversine',
 	)
 
 	target_args.add_argument(
@@ -386,8 +384,10 @@ async def main() -> None:
 			]
 		)
 
-	# This part could maybe be a function but ehhh
-	distances = get_distances(points, new_points, use_haversine=args.use_haversine)
+	distance_method = DistanceMethod(args.distance_method)
+	# TODO: Default to haversine if and only if using rounds instead of targets
+	# TODO: This part could maybe be a separate function, though it does require mutating new_points and distances
+	distances = get_distances(points, new_points, distance_method)
 	threshold: float | None = args.threshold
 	if threshold is not None:
 		under_threshold = distances['distance'] < threshold
@@ -422,8 +422,8 @@ async def main() -> None:
 			args.output_path,
 			args.name_col,
 			improvement_threshold,
+			distance_method,
 			find_if_any_pics_better=args.find_if_any_pics_better,
-			use_haversine=args.use_haversine,
 		)
 	if args.rounds_path:
 		await eval_with_rounds(
@@ -432,7 +432,7 @@ async def main() -> None:
 			args.rounds_path,
 			args.name,
 			args.rounds_output_path,
-			use_haversine=args.use_haversine,
+			distance_method,
 		)
 
 

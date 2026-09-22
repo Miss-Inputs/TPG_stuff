@@ -13,7 +13,7 @@ import geopandas
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.util.distance import cartesian_product_distances
+from travelpygame.util.distance import DistanceMethod, cartesian_product_distances
 from travelpygame.util.io_utils import output_geodataframe
 
 from lib.io_utils import load_or_fetch_submission_summary
@@ -24,7 +24,9 @@ if TYPE_CHECKING:
 	from travelpygame.submission_data import SubmissionSummary
 
 
-def get_unique_pics(subs: 'SubmissionSummary', threshold: int) -> geopandas.GeoDataFrame:
+def get_unique_pics(
+	subs: 'SubmissionSummary', threshold: int, distance_method: DistanceMethod
+) -> geopandas.GeoDataFrame:
 	gdf = geopandas.GeoDataFrame(subs.submissions, geometry='point', crs='wgs84')
 	# TODO: Option to filter for active players only (last submitted something after a certain date)
 
@@ -41,7 +43,9 @@ def get_unique_pics(subs: 'SubmissionSummary', threshold: int) -> geopandas.GeoD
 				continue
 
 			others = gdf.drop(index=group.index)
-			other_distances = cartesian_product_distances(group.geometry, others.geometry)
+			other_distances = cartesian_product_distances(
+				group.geometry, others.geometry, distance_method
+			)
 
 			for index, row in tqdm(group.iterrows(), total=n_pics, leave=False, unit='row'):
 				point = row['point']
@@ -84,14 +88,21 @@ async def main() -> None:
 		default=2,
 		help='Only include pics from players who have submitted at least this amount of unique pics. Defaults to 2, setting it to 0 or lower is effectively disabling it',
 	)
+	argparser.add_argument(
+		'--distance-method',
+		choices=DistanceMethod,
+		default='geodetic',
+		help='Can be geodetic (default, most accurate), haversine (faster, assumes Earth is a sphere), euclidean (fastest, assumes Earth is flat), defaults to geodetic',
+	)
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
+	distance_method = DistanceMethod(args.distance_method)
 
 	subs_path = Settings().submission_summary_path
 	subs = await load_or_fetch_submission_summary(subs_path)
 	# Do NOT even think about trying to use self_cartesian_product_distances(subs.geometry) to just get vectorized distances all at once. You will accomplish nothing except rendering your computer inoperable for 20 minutes while it runs out of memory and thrashes. Do it whatever the other way is.
 
-	gdf = get_unique_pics(subs, args.threshold)
+	gdf = get_unique_pics(subs, args.threshold, distance_method)
 	gdf = gdf.sort_values('closest_distance', ascending=False)
 	print(gdf)
 	if output_path:

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Find the best pic for each point in a given set of polygons (e.g. a geofile containing countries) and the best and worst point of each polygon for your points, so you can use it to predict how well you might do in a particular TPG, for example."""
-#TODO: WIP, put this in the readme when done
+# TODO: WIP, put this in the readme when done
 
 import asyncio
 import logging
-from argparse import ArgumentParser, BooleanOptionalAction
+from argparse import ArgumentParser
 from collections.abc import Hashable
 from operator import itemgetter
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas
 from geopandas import GeoDataFrame
 from shapely import MultiPolygon, Point, Polygon, prepare
 from tqdm.auto import tqdm
 from travelpygame.util import (
+	DistanceMethod,
 	format_dataframe,
 	format_distance,
 	maybe_set_index_name_col,
@@ -30,8 +31,11 @@ if TYPE_CHECKING:
 	from travelpygame.point_set import PointSet
 
 
-def _get_best_pic_dest_point(dest: Point, dest_name: str, pics: 'PointSet', *, use_haversine: bool):
-	closest_index, distance = pics.get_closest_index(dest, use_haversine=use_haversine)
+def _get_best_pic_dest_point(
+	dest: Point, dest_name: str, pics: 'PointSet', distance_method: DistanceMethod
+) -> dict[str, Any]:
+	closest_index, distance = pics.get_closest_index(dest, distance_method)
+	# TODO: Worst case as well
 	return {
 		'name': dest_name,
 		'closest': closest_index,
@@ -40,9 +44,11 @@ def _get_best_pic_dest_point(dest: Point, dest_name: str, pics: 'PointSet', *, u
 	}
 
 
-def _get_row(dest: 'BaseGeometry', dest_name: str, pics: 'PointSet', *, use_haversine: bool):
+def _get_row(
+	dest: 'BaseGeometry', dest_name: str, pics: 'PointSet', distance_method: DistanceMethod
+):
 	if isinstance(dest, Point):
-		return _get_best_pic_dest_point(dest, dest_name, pics, use_haversine=use_haversine)
+		return _get_best_pic_dest_point(dest, dest_name, pics, distance_method)
 	if not isinstance(dest, (Polygon, MultiPolygon)):
 		raise TypeError(f'{dest_name} had unsupported geometry type {type(dest)}')
 	prepare(dest)
@@ -52,15 +58,15 @@ def _get_row(dest: 'BaseGeometry', dest_name: str, pics: 'PointSet', *, use_have
 
 	for index, point in pics.items():
 		(best_point, best_dist), (worst_point, worst_dist) = get_point_to_polygon_distance(
-			point, dest, None, use_haversine=use_haversine
+			point, dest, None, distance_method
 		)
 		best_points.append((index, best_point, best_dist))
 		worst_points.append((worst_point, worst_dist))
-		# TODO: You may need to do a very slow check of all distances to everywhere in worst_points for this to be completely accurate but I dunno
+		# TODO: You may need to do a very slow check of all distances to everywhere in worst_points for this to be completely accurate but I dunno. Is that true? Maybe
 
 	closest_point, closest_dest, closest_dist = min(best_points, key=itemgetter(2))
 	worst_point = max(worst_points, key=itemgetter(1))[0]
-	closest_worst, worst_dist = pics.get_closest_index(worst_point, use_haversine=use_haversine)
+	closest_worst, worst_dist = pics.get_closest_index(worst_point, distance_method)
 
 	return {
 		'name': dest_name,
@@ -101,10 +107,10 @@ def main() -> None:
 		help='Report on how often each pic is better than this distance (in km)',
 	)
 	argparser.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to false',
-		default=True,
+		'--distance-method',
+		choices=DistanceMethod,
+		default='geodetic',
+		help='Distance method, defaults to geodetic',
 	)
 	args = argparser.parse_args()
 
@@ -120,6 +126,7 @@ def main() -> None:
 	dests, _auto_dest_name_col = maybe_set_index_name_col(dests, target_name_col, target_path.name)
 	if not dests.active_geometry_name:
 		raise ValueError('no geometry in dests?')
+	distance_method = DistanceMethod(args.distance_method)
 
 	rows = []
 	with tqdm(dests.iterrows(), 'Finding best pics', dests.index.size, unit='target') as t:
@@ -128,7 +135,7 @@ def main() -> None:
 			t.set_postfix(target=name)
 			# TODO: Fall back to a better name from like a representative point or something if auto_dest_name_col was not set
 			dest = dest_row[dests.active_geometry_name]
-			row = _get_row(dest, name, point_set, use_haversine=args.use_haversine)
+			row = _get_row(dest, name, point_set, distance_method)
 			rows.append(row)
 
 	df = pandas.DataFrame(rows)

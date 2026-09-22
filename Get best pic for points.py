@@ -12,6 +12,7 @@ from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.util import (
+	DistanceMethod,
 	find_first_matching_column,
 	first_unique_column_label,
 	format_dataframe,
@@ -55,10 +56,10 @@ def main() -> None:
 		help='Report on how often each pic is better than this distance (in km)',
 	)
 	argparser.add_argument(
-		'--use-haversine',
-		action=BooleanOptionalAction,
-		help='Use haversine for distances, defaults to true',
-		default=True,
+		'--distance-method',
+		choices=DistanceMethod,
+		default='geodetic',
+		help='Distance method, defaults to geodetic',
 	)
 
 	tqdm_args = argparser.add_argument_group('tqdm args')
@@ -85,6 +86,7 @@ def main() -> None:
 		or find_first_matching_column(dests, maybe_name_cols)
 		or first_unique_column_label(dests)
 	)
+	distance_method = DistanceMethod(args.distance_method)
 
 	wgs84 = CRS.from_user_input('WGS84')
 
@@ -115,7 +117,7 @@ def main() -> None:
 				name = target_names[index]
 				t.set_postfix(target=name, refresh=args.tqdm_miniters is None)
 			best_pics[index], distances[index] = point_set.get_closest_index(
-				target, use_haversine=args.use_haversine
+				target, distance_method
 			)
 
 	df = pandas.DataFrame({'dest': target_names, 'best_pic': best_pics, 'distance': distances})
