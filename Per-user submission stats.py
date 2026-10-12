@@ -14,13 +14,20 @@ import pandas
 import shapely
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame.point_set import PointSet, get_visited_regions
 from travelpygame.point_set_stats import get_point_set_stats
-from travelpygame.util import format_dataframe, format_point, geod_distance, wgs84_geod
+from travelpygame.util import (
+	format_dataframe,
+	format_point,
+	geod_distance,
+	maybe_set_index_name_col,
+	read_geodataframe_async,
+	wgs84_geod,
+)
 
 from lib.io_utils import load_or_fetch_point_sets
 
 if TYPE_CHECKING:
-	from travelpygame.point_set import PointSet
 	from travelpygame.tpg_data import PlayerName
 
 
@@ -51,7 +58,12 @@ def get_concave_hull_info(point_set: 'PointSet'):
 	return HullInfo(hull, area, perimeter)
 
 
-def get_stats(point_sets: Collection['PointSet'], *, find_furthest: bool) -> pandas.DataFrame:
+def get_stats(
+	point_sets: Collection['PointSet'],
+	regions: geopandas.GeoDataFrame | None,
+	*,
+	find_furthest: bool,
+) -> pandas.DataFrame:
 	data: dict[PlayerName, dict[str, Any]] = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
 		for point_set in t:
@@ -67,7 +79,13 @@ def get_stats(point_sets: Collection['PointSet'], *, find_furthest: bool) -> pan
 				get_projected_centroid=False,
 			)
 			row: dict[str, Any] = {'count': point_set.count, **asdict(stats)}
-
+			if regions is not None:
+				visited_regions_counts = get_visited_regions(point_set, regions)
+				visited_regions = {
+					region for region, count in visited_regions_counts.items() if count
+				}
+				row['region_count'] = len(visited_regions)
+				
 			data[point_set.name] = row
 	df = pandas.DataFrame.from_dict(data, 'index')
 	df = df.reset_index(names='name')
@@ -102,18 +120,35 @@ async def main() -> None:
 		default=False,
 		help='Find the furthest possible point on the planet for each player. Defaults to false.',
 	)
+	argparser.add_argument(
+		'--regions',
+		'--region-path',
+		type=Path,
+		help='Optional file to load regions from (e.g. countries or subdivisions) as polygons, and count how many regions each player has been to',
+	)
 
 	args = argparser.parse_args()
 	path: Path | None = args.path
 
 	threshold: int | None = args.threshold
 
-	# Maybe should use aliases, I dunno
+	regions_path: Path | None = args.regions
+	if regions_path:
+		regions = await read_geodataframe_async(regions_path)
+		regions, auto_regions_name_col = maybe_set_index_name_col(
+			regions, log_context=regions_path.name
+		)
+		if auto_regions_name_col:
+			print(f'Set {regions_path.name} index to {auto_regions_name_col}')
+	else:
+		regions = None
+
+	# maybe threshold/min datetime can be arguments
 	all_point_sets = await load_or_fetch_point_sets(path)
 
 	point_sets = [ps for ps in all_point_sets if threshold is None or ps.count >= threshold]
 
-	stats = get_stats(point_sets, find_furthest=args.find_furthest_points)
+	stats = get_stats(point_sets, regions, find_furthest=args.find_furthest_points)
 	# I should make these paths configurable but I didn't and haven't, and should
 	stats.to_csv('/tmp/stats.csv', index=False)
 	# TODO: Yeah nah westmost/etc nw_most/etc need to be split up
