@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Collection, Hashable
+from collections.abc import Collection, Hashable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -145,7 +145,9 @@ async def load_or_fetch_point_sets(
 	return get_all_point_sets(summary.per_player, min_datetime, min_count)
 
 
-def set_name_col(gdf: 'GeoDataFrame', name_col: Hashable | None, log_context: Any = None):
+def set_name_col(
+	gdf: 'GeoDataFrame', name_col: Hashable | None, log_context: Any = None
+) -> 'GeoDataFrame':
 	gdf, new_name_col = maybe_set_index_name_col(gdf, name_col, log_context)
 	if not new_name_col:
 		# Should this always be what we want to do?
@@ -203,6 +205,20 @@ async def load_point_set_from_path(
 	return PointSet(gdf, name, projected_crs_arg)
 
 
+def filter_gdf(
+	gdf: 'GeoDataFrame',
+	include_args: list[Sequence[str]] | None = None,
+	exclude_args: list[Sequence[str]] | None = None,
+) -> 'GeoDataFrame':
+	if include_args:
+		for field, value in include_args:
+			gdf = gdf[gdf[field] == value]
+	if exclude_args:
+		for field, value in exclude_args:
+			gdf = gdf[gdf[field] != value]
+	return gdf
+
+
 async def load_point_set_from_arg(
 	path_or_name: str,
 	lat_col: str | None = None,
@@ -231,11 +247,11 @@ async def load_point_set_from_arg(
 	)
 
 
-def _listdir_sync(path: Path):
+def _listdir_sync(path: Path) -> list[Path]:
 	return list(path.iterdir())
 
 
-async def listdir_async(path: Path):
+async def listdir_async(path: Path) -> list[Path]:
 	return await asyncio.to_thread(_listdir_sync, path)
 
 
@@ -245,7 +261,7 @@ def load_point_sets_from_folder(
 	*,
 	force_all: bool = False,
 	use_tqdm: bool = True,
-):
+) -> list[PointSet]:
 	"""Loads a list of PointSet objects from a folder. Will always load .geojson/.gpkg files, additional extensions can be specified."""
 	frames: dict[Path, GeoDataFrame] = {}
 	geo_exts = {*known_geo_exts, *extensions} if extensions else known_geo_exts

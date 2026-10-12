@@ -32,6 +32,7 @@ from travelpygame.util import (
 )
 
 from lib.format_utils import describe_point
+from lib.io_utils import filter_gdf
 from lib.stats import get_longest_distance_from_point
 
 
@@ -150,20 +151,6 @@ async def _random_points_in_poly(
 		_print_data(total_data)
 
 	return geopandas.GeoDataFrame(rows, geometry='point', crs='wgs84')
-
-
-def filter_gdf(
-	gdf: geopandas.GeoDataFrame,
-	include_args: list[list[str]] | None,
-	exclude_args: list[list[str]] | None,
-) -> geopandas.GeoDataFrame:
-	if include_args:
-		for field, value in include_args:
-			gdf = gdf[gdf[field] == value]
-	if exclude_args:
-		for field, value in exclude_args:
-			gdf = gdf[gdf[field] != value]
-	return gdf
 
 
 async def main() -> None:

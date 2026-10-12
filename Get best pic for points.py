@@ -11,6 +11,7 @@ from pyproj import CRS
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from travelpygame.point_set import PointSet
 from travelpygame.util import (
 	DistanceMethod,
 	find_first_matching_column,
@@ -23,7 +24,7 @@ from travelpygame.util import (
 )
 from travelpygame.util.pandas_utils import maybe_name_cols
 
-from lib.io_utils import load_point_set_from_path
+from lib.io_utils import filter_gdf, load_point_set_from_path
 
 logger = logging.getLogger()
 
@@ -31,7 +32,9 @@ logger = logging.getLogger()
 def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
-		'points', type=Path, help='Path of file with existing points to find the best ones out of'
+		'point_set',
+		type=Path,
+		help='Path of file with existing points to find the best ones out of',
 	)
 	argparser.add_argument(
 		'targets',
@@ -40,11 +43,6 @@ def main() -> None:
 	)
 	argparser.add_argument(
 		'out_path', type=Path, nargs='?', help='Output distances/best pics to a file, optionally'
-	)
-	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
-	argparser.add_argument(
-		'--source-name-col',
-		help='Column label in points with the name of each point, or autodetect (it will be okay to not have any such column)',
 	)
 	argparser.add_argument(
 		'--dest-name-col',
@@ -60,6 +58,20 @@ def main() -> None:
 		choices=DistanceMethod,
 		default='geodetic',
 		help='Distance method, defaults to geodetic',
+	)
+
+	# TODO: All the lat_col/lng_col arguments, for now just don't be weird, and have a normal lat and lng col
+	point_set_args = argparser.add_argument_group('Point set args', 'Arguments for point set')
+	point_set_args.add_argument(
+		'--source-name-col',
+		help='Column label in points with the name of each point, or autodetect (it will be okay to not have any such column)',
+	)
+	point_set_args.add_argument(
+		'--filter',
+		action='append',
+		nargs=2,
+		metavar=('field', 'value'),
+		help='Filters the input to only rows matching a certain value, as (field name) == (value). Multiple pairs of field/value can be specified multiple times to restrict to rows matching _all_ filters',
 	)
 
 	tqdm_args = argparser.add_argument_group('tqdm args')
@@ -78,8 +90,14 @@ def main() -> None:
 	args = argparser.parse_args()
 
 	point_set = asyncio.run(
-		load_point_set_from_path(args.points, point_name_col=args.source_name_col, force_wgs84=True)
+		load_point_set_from_path(
+			args.point_set, point_name_col=args.source_name_col, force_wgs84=True
+		)
 	)
+	if args.filter:
+		gdf = filter_gdf(point_set.gdf, args.filter)
+		point_set = PointSet(gdf, point_set.name, point_set.projected_crs)
+
 	dests = load_points(args.targets)
 	dest_name_col = (
 		args.dest_name_col
