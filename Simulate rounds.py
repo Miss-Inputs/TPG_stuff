@@ -130,13 +130,34 @@ def output_results(
 				compare_rounds(r, result, name)
 
 	round_summary = get_round_summary(new_rounds, name)
-	print(round_summary)
+	print(
+		format_dataframe(
+			round_summary,
+			number_cols=round_summary.columns[round_summary.columns.str.endswith('_score')],
+			distance_cols=round_summary.columns[round_summary.columns.str.endswith('_distance')],
+		)
+	)
 	if round_summary_path:
 		output_dataframe(round_summary, round_summary_path)
 
 	# TODO: More detailed stats here, like maybe a whole entire leaderboard
 	player_summary = get_player_summary(new_rounds)
-	print(player_summary)
+	print(
+		format_dataframe(
+			player_summary,
+			distance_cols=('total_distance'),
+			number_cols=(
+				'total',
+				'best_score',
+				'worst_score',
+				'times_closer_than_average',
+				'rounds_won',
+				'rounds_podiummed',
+				'rounds_lost',
+				'count',
+			),
+		)
+	)
 	if player_summary_path:
 		output_dataframe(player_summary, player_summary_path)
 
