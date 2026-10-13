@@ -3,6 +3,7 @@ async-lru
 backoff
 contextily
 geopandas
+networkx
 pycountry
 pydantic-settings
 python-dotenv

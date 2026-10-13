@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Finds where players have a submission that is close to that of another player and makes a network (graph, whatever you call it) by pretending that both players have met each other there.
-WIP
+WIP kinda
 """
 
 import asyncio
@@ -11,19 +11,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import networkx
 import numpy
 from geopandas import GeoDataFrame
+from pandas import DataFrame, Series
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame.util import format_dataframe
+from travelpygame.util import format_dataframe, format_xy
 from travelpygame.util.distance import (
 	EQ_LONGITUDE_DEG_M,
 	DistanceMethod,
 	FloatNDArray,
 	get_distances,
 )
-from travelpygame.util.io_utils import output_geodataframe
+from travelpygame.util.io_utils import output_dataframe, output_geodataframe
 
 from lib.io_utils import load_or_fetch_submission_summary
 from lib.settings import Settings
@@ -61,8 +63,7 @@ def get_by_player(
 			]
 			if not dates or max(dates) < min_date:
 				continue
-		by_player[player] = numpy.asarray([(sub.point.x, sub.point.y) for sub in player_subs])
-		# well, there's definitely a better way to write that one
+		by_player[player] = numpy.asarray(sorted((sub.point.x, sub.point.y) for sub in player_subs))
 	print(
 		f'{len(by_player)} players (before threshold: {len({s.player for s in subs.submissions})})'
 	)
@@ -124,6 +125,34 @@ def get_shared_pics(
 	return gdf
 
 
+def get_graph(gdf: GeoDataFrame, path: Path | None) -> networkx.Graph:
+	g = networkx.Graph()
+	# Not sure if we want to do anything in particular with point_2
+	g.add_edges_from(
+		(
+			row['player_1'],
+			row['player_2'],
+			{'lat': row['point_1'].y, 'lng': row['point_1'].x, 'distance': row['distance']},
+		)
+		for _, row in gdf.iterrows()
+	)
+	if path:
+		networkx.write_graphml_xml(g, path)
+	return g
+
+
+def describe_path(g: networkx.Graph, path: list[str]) -> str:
+	parts = [path[0]]
+	for start, end in itertools.pairwise(path):
+		# This will need a rewritearoo if we ever use multigraphs
+		edge = g.edges[start, end]
+		lat: float = edge['lat']
+		lng: float = edge['lng']
+		desc = format_xy(lng, lat)
+		parts.append(f' -> {end} ({desc})')
+	return ''.join(parts)
+
+
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	argparser.add_argument(
@@ -137,6 +166,11 @@ async def main() -> None:
 		type=float,
 		default=100,
 		help='Distance in metres, where two pics within this threshold are considered close to each other. Defaults to 100m',
+	)
+	argparser.add_argument(
+		'--graph-path',
+		type=Path,
+		help='Load graph from here if it exists, or save it here if not; expects GraphML format',
 	)
 	player_args = argparser.add_argument_group('Player args', 'Options to filter players')
 	player_args.add_argument(
@@ -153,36 +187,66 @@ async def main() -> None:
 	)
 	output_args = argparser.add_argument_group('Output args')
 	output_args.add_argument(
-		'--output-path',
+		'--pairs-path',
 		type=Path,
 		help='Where to save list of shared submissions, can be .csv or .geojson/.gpkg/etc',
 	)
+	output_args.add_argument(
+		'--longest-paths-path', type=Path, help='Where to save list of longest paths (csv, etc)'
+	)
 	args = argparser.parse_args()
-	output_path: Path | None = args.output_path
+	pairs_path: Path | None = args.pairs_path
 	distance_method = DistanceMethod(args.distance_method)
 
-	settings = Settings()
-	# TODO: Have this be an argument instead
-	subs_path = settings.submission_summary_path
-	subs = await load_or_fetch_submission_summary(
-		subs_path, settings.tpg_export_path, aliases_path=settings.aliases_path
-	)
+	if args.graph_path and await asyncio.to_thread(args.graph_path.is_file):
+		g = networkx.read_graphml(args.graph_path)
+	else:
+		settings = Settings()
+		# TODO: Have this be an argument instead
+		subs_path = settings.submission_summary_path
+		subs = await load_or_fetch_submission_summary(
+			subs_path, settings.tpg_export_path, aliases_path=settings.aliases_path
+		)
 
-	# TODO: Argument for allow_multiple once I implement that properly (zzzz)
-	gdf = get_shared_pics(
-		subs,
-		args.pic_count_threshold,
-		args.date_threshold,
-		args.threshold,
-		distance_method,
-		allow_multiple=False,
-	)
-	# I don't think we really need to hang on to the full list of players including those not in the network
-	gdf = gdf.sort_values(['player_1', 'player_2'])
-	print(format_dataframe(gdf, distance_cols={'distance'}, point_cols={'point_1', 'point_2'}))
-	if output_path:
-		# Maybe put each direction on one line? Or something like that, I dunno, I'll figure out what I want to do output-wise later
-		await asyncio.to_thread(output_geodataframe, gdf, output_path, index=False)
+		# TODO: Argument for allow_multiple once I implement that properly (zzzz)
+		gdf = get_shared_pics(
+			subs,
+			args.pic_count_threshold,
+			args.date_threshold,
+			args.threshold,
+			distance_method,
+			allow_multiple=False,
+		)
+		# I don't think we really need to hang on to the full list of players including those not in the network
+		gdf = gdf.sort_values(['player_1', 'player_2'])
+		print(format_dataframe(gdf, distance_cols={'distance'}, point_cols={'point_1', 'point_2'}))
+		if pairs_path:
+			# Maybe put each direction on one line? Or something like that, I dunno, I'll figure out what I want to do output-wise later
+			await asyncio.to_thread(output_geodataframe, gdf, pairs_path, index=False)
+
+		g = get_graph(gdf, args.graph_path)
+	print(g)
+	print('Connected:', networkx.is_connected(g))
+
+	longest_paths: dict[PlayerName, tuple[PlayerName, str, int]] = {}
+	for source, paths in networkx.all_pairs_shortest_path(g):
+		longest_paths[source] = min(
+			(
+				(dest, describe_path(g, path), len(path) - 1)
+				for dest, path in paths.items()
+				if dest != source
+			),
+			key=lambda kv: (-kv[2], kv[0]),
+		)
+
+	df = DataFrame.from_dict(longest_paths, 'index', columns=['furthest', 'path', 'dist'])
+	df.index.name = 'player'
+	df = df.sort_index().sort_values('dist', ascending=False)
+	print(df)
+	if args.longest_paths_path:
+		await asyncio.to_thread(output_dataframe, df, args.longest_paths_path, index=True)
+
+	print(Series(dict(g.degree)).sort_values(ascending=False))
 
 
 if __name__ == '__main__':
