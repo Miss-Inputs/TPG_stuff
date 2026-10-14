@@ -92,24 +92,31 @@ def _join_labels(labels: list[Hashable]):
 
 
 def print_extreme_points(stats: PointSetStats):
-	west, westmost = stats.westmost
-	east, eastmost = stats.eastmost
-	north, northmost = stats.northmost
-	south, southmost = stats.southmost
+	print(
+		f'Westmost point{_join_labels(stats.westmost)} ({format_number(stats.westmost_lng, 12)}°)'
+	)
+	print(
+		f'Eastmost point{_join_labels(stats.eastmost)} ({format_number(stats.eastmost_lng, 12)}°)'
+	)
+	print(
+		f'Northmost point{_join_labels(stats.northmost)} ({format_number(stats.northmost_lat, 12)}°)'
+	)
+	print(
+		f'Southmost point{_join_labels(stats.southmost)} ({format_number(stats.southmost_lat, 12)}°)'
+	)
 
-	print(f'Westmost point{_join_labels(westmost)} ({format_number(west, 12)}°)')
-	print(f'Eastmost point{_join_labels(eastmost)} ({format_number(east, 12)}°)')
-	print(f'Northmost point{_join_labels(northmost)} ({format_number(north, 12)}°)')
-	print(f'Southmost point{_join_labels(southmost)} ({format_number(south, 12)}°)')
-
-	nw_dist, nwmost = stats.nw_most
-	ne_dist, nemost = stats.ne_most
-	sw_dist, swmost = stats.sw_most
-	se_dist, semost = stats.se_most
-	print(f'Northwestmost point: {nwmost}, {format_distance(nw_dist)} away from corner')
-	print(f'Northeastmost point: {nemost}, {format_distance(ne_dist)} away from corner')
-	print(f'Southwestmost point: {swmost}, {format_distance(sw_dist)} away from corner')
-	print(f'Southeastmost point: {semost}, {format_distance(se_dist)} away from corner')
+	print(
+		f'Northwestmost point: {stats.northwestmost}, {format_distance(stats.northwestmost_dist)} away from corner'
+	)
+	print(
+		f'Northeastmost point: {stats.northeastmost}, {format_distance(stats.northeastmost_dist)} away from corner'
+	)
+	print(
+		f'Southwestmost point: {stats.southwestmost}, {format_distance(stats.southwestmost_dist)} away from corner'
+	)
+	print(
+		f'Southeastmost point: {stats.southeastmost}, {format_distance(stats.southeastmost_dist)} away from corner'
+	)
 
 
 def print_extents(stats: PointSetStats):
