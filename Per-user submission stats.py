@@ -62,7 +62,11 @@ def get_concave_hull_info(point_set: 'PointSet') -> HullInfo:
 
 
 def get_stats(
-	point_sets: Collection['PointSet'], regions: GeoDataFrame | None, *, find_antipoints: bool
+	point_sets: Collection['PointSet'],
+	regions: GeoDataFrame | None,
+	*,
+	find_antipoints: bool,
+	world_tpg_only: bool,
 ) -> DataFrame:
 	data: dict[PlayerName, dict[str, Any]] = {}
 	with tqdm(point_sets, 'Calculating stats', unit='player') as t:
@@ -75,9 +79,11 @@ def get_stats(
 			earliest_known = point_set.gdf['earliest_known'].min()
 			latest_known = point_set.gdf['latest_known'].max()
 			game_names = set(point_set.gdf['game_names'].explode())
+			if world_tpg_only and 'World TPG' not in game_names:
+				continue
 			# TODO: A lot more parameters should be optional
 			# Using .estimate_utm_crs() seems like a good idea, but it causes infinite coordinates for some people who have travelled too much, so that's no good
-			# TODO: Some things are not in PointSetStats yet: anti-centroid (antipode of centroid), concave hull perimeter; if you care that much
+			# TODO: Some things are not in PointSetStats yet: concave hull perimeter; if you care that much
 
 			stats = get_point_set_stats(
 				point_set,
@@ -85,7 +91,7 @@ def get_stats(
 				find_antipoint=find_antipoints,
 				get_projected_centroid=False,
 			)
-			# TODO: Use antipode of centroid instead if find_antipoints is False
+			# TODO: Use antipode of centroid for closest distance to such instead if find_antipoints is False
 			row: dict[str, Any] = {
 				'# unique pics': point_set.count,
 				'Most submitted': most_submitted,
@@ -125,7 +131,8 @@ def get_stats(
 			# centres
 			row.update(stats.centres)
 			row.update(stats.antipoints)
-			row['Main TPG?'] = 'World TPG' in game_names
+			if not world_tpg_only:
+				row['Main TPG?'] = 'World TPG' in game_names
 			row['Known games'] = ', '.join(sorted(game_names))
 			data[point_set.name] = row
 	df = DataFrame.from_dict(data, 'index')
@@ -158,6 +165,12 @@ def main() -> None:
 		'--date-threshold',
 		type=datetime.fromisoformat,
 		help='Only include players who have known submissions at least after this date (YYYY-MM-DD format only, no being weird allowed).',
+	)
+	filter_args.add_argument(
+		'--world-tpg-only',
+		'--main-tpg-only',
+		action='store_true',
+		help='Only include players who have submitted to main World TPG',
 	)
 	argparser.add_argument(
 		'--find-antipoints',
@@ -201,7 +214,9 @@ def main() -> None:
 
 	point_sets = asyncio.run(load_or_fetch_point_sets(path, min_date, threshold))
 
-	df = get_stats(point_sets, regions, find_antipoints=find_antipoints)
+	df = get_stats(
+		point_sets, regions, find_antipoints=find_antipoints, world_tpg_only=args.world_tpg_only
+	)
 	geom_cols = [
 		col_name for col_name, col in df.select_dtypes('object', 'str').items() if _is_geom(col)
 	]
