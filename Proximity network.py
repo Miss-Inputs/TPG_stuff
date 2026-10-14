@@ -9,12 +9,13 @@ import logging
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
+from statistics import mean
 from typing import TYPE_CHECKING
 
 import networkx
 import numpy
 from geopandas import GeoDataFrame
-from pandas import DataFrame, Series
+from pandas import DataFrame
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -149,8 +150,30 @@ def describe_path(g: networkx.Graph, path: list[str]) -> str:
 		lat: float = edge['lat']
 		lng: float = edge['lng']
 		desc = format_xy(lng, lat)
-		parts.append(f' -> {end} ({desc})')
+		parts.append(f' 🤝 {end} ({desc})')
 	return ''.join(parts)
+
+
+def paths_to_df(
+	g: networkx.Graph, paths: dict['PlayerName', dict['PlayerName', list['PlayerName']]]
+) -> DataFrame:
+	communicability = networkx.communicability(g)  # why not
+	rows = []
+	for source, dests in paths.items():
+		for dest, path in dests.items():
+			if source == dest:
+				continue
+			rows.append(
+				{
+					'player': source,
+					'dest': dest,
+					'path': describe_path(g, path),
+					'len': len(path) - 1,
+					'communicability': communicability[source][dest],
+				}
+			)
+	df = DataFrame(rows)
+	return df.sort_values(['player', 'dest'])
 
 
 async def main() -> None:
@@ -192,10 +215,17 @@ async def main() -> None:
 		help='Where to save list of shared submissions, can be .csv or .geojson/.gpkg/etc',
 	)
 	output_args.add_argument(
-		'--longest-paths-path', type=Path, help='Where to save list of longest paths (csv, etc)'
+		'--paths-path',
+		type=Path,
+		help='Where to save list of paths from one player to other (csv, etc)',
+	)
+	output_args.add_argument(
+		'--stats-path', type=Path, help='Where to save list of players + stats + etc (csv, etc)'
 	)
 	args = argparser.parse_args()
 	pairs_path: Path | None = args.pairs_path
+	paths_path: Path | None = args.paths_path
+	stats_path: Path | None = args.stats_path
 	distance_method = DistanceMethod(args.distance_method)
 
 	if args.graph_path and await asyncio.to_thread(args.graph_path.is_file):
@@ -228,25 +258,34 @@ async def main() -> None:
 	print(g)
 	print('Connected:', networkx.is_connected(g))
 
-	longest_paths: dict[PlayerName, tuple[PlayerName, str, int]] = {}
-	for source, paths in networkx.all_pairs_shortest_path(g):
-		longest_paths[source] = min(
-			(
-				(dest, describe_path(g, path), len(path) - 1)
-				for dest, path in paths.items()
-				if dest != source
-			),
-			key=lambda kv: (-kv[2], kv[0]),
-		)
+	paths: dict[PlayerName, dict[PlayerName, list[PlayerName]]] = dict(
+		networkx.all_pairs_shortest_path(g)
+	)
+	path_lengths = {
+		source: {dest: len(path) for dest, path in dests.items()} for source, dests in paths.items()
+	}
+	paths_df = paths_to_df(g, paths)
+	print(paths_df)
+	if paths_path:
+		await asyncio.to_thread(output_dataframe, paths_df, paths_path, index=False)
 
-	df = DataFrame.from_dict(longest_paths, 'index', columns=['furthest', 'path', 'dist'])
-	df.index.name = 'player'
-	df = df.sort_index().sort_values('dist', ascending=False)
-	print(df)
-	if args.longest_paths_path:
-		await asyncio.to_thread(output_dataframe, df, args.longest_paths_path, index=True)
+	longest_paths = paths_df.groupby('player')['len'].idxmax()
+	stats = (
+		paths_df.loc[longest_paths]
+		.set_index('player')[['path', 'len']]
+		.rename(columns={'path': 'longest_path', 'len': 'longest_path_len'})
+	)
+	stats['degree'] = dict(g.degree)
+	stats['closeness_centrality'] = networkx.closeness_centrality(g, sp=path_lengths)
+	stats['betweenness_centrality'] = networkx.betweenness_centrality(g)
+	stats['average_path_len'] = {
+		source: mean(lens.values()) for source, lens in path_lengths.items()
+	}
+	# stats['closeness_vitality'] = networkx.closeness_vitality(g) #takes way too long buddy
 
-	print(Series(dict(g.degree)).sort_values(ascending=False))
+	print(stats)
+	if stats_path:
+		await asyncio.to_thread(output_dataframe, stats, stats_path, index=True)
 
 
 if __name__ == '__main__':
