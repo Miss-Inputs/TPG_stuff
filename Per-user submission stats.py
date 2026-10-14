@@ -113,7 +113,7 @@ def get_stats(
 			row['Max west'] = point_set[stats.westmost[0]]
 			row['Max east'] = point_set[stats.eastmost[0]]
 			row['Max north'] = point_set[stats.northmost[0]]
-			row['Max south'] = point_set[stats.northmost[0]]
+			row['Max south'] = point_set[stats.southmost[0]]
 			row['Max northwest'] = point_set[stats.northwestmost]
 			row['Max northeast'] = point_set[stats.northeastmost]
 			row['Max southwest'] = point_set[stats.southwestmost]
