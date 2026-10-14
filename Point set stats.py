@@ -9,9 +9,9 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import geopandas
 import pandas
 from aiohttp import ClientSession
+from geopandas import GeoDataFrame, GeoSeries
 from travelpygame.point_set_stats import PointSetStats, find_furthest_point, get_point_set_stats
 from travelpygame.util import format_area, get_point_antipodes
 from travelpygame.util.distance import self_cartesian_product_distances
@@ -84,7 +84,7 @@ async def print_centre_points(
 	)
 
 
-def _join_labels(labels: list[Hashable]):
+def _join_labels(labels: list[Hashable]) -> str:
 	if len(labels) == 1:
 		return f': {labels[0]}'
 	joined = ', '.join(str(label) for label in labels)
@@ -118,12 +118,21 @@ def print_extreme_points(stats: PointSetStats):
 		f'Southeastmost point: {stats.southeastmost}, {format_distance(stats.southeastmost_dist)} away from corner'
 	)
 
+	if stats.antipoint_closest:
+		assert stats.antipoint_dist, 'antipoint_dist is None even though antipoint_closest is not'
+		print(
+			f'Closest point to furthest away point: {stats.antipoint_closest}, {format_distance(stats.antipoint_dist)} away'
+		)
+
 
 def print_extents(stats: PointSetStats):
 	for name, distance in stats.distance_extents.items():
 		print(f'{name}: {format_distance(distance)}')
 	for name, area in stats.area_extents.items():
 		print(f'{name}: {format_area(area)}')
+	print(f'Number of graticules visited: {format_number(stats.num_graticles)}')
+	print(f'Latitude range: {format_number(stats.latitude_range, 12)}°')
+	print(f'Longitude range: {format_number(stats.longitude_range, 12)}°')
 
 
 def print_unique_points(point_set: 'PointSet', uniqueness_path: Path | None):
@@ -182,14 +191,14 @@ async def print_furthest_point_from_poly(
 async def print_furthest_points(
 	point_set: 'PointSet', stats: PointSetStats, session: ClientSession | None
 ):
-	if stats.antipoint:
-		assert stats.antipoint_dist is not None
-		desc = await _maybe_describe_point(stats.antipoint, session)
-		print(
-			f'Furthest point: {desc}, {format_distance(stats.antipoint_dist)} away, closest to {stats.antipoint_closest}'
-		)
+	for name, point in stats.antipoints.items():
+		desc = await _maybe_describe_point(point, session)
+		closest_index, dist = point_set.get_closest_index(point)
+		if name == 'Antipoint':
+			print(f'Furthest point: {desc}')
+		else:
+			print(f'{name}: {desc}, {format_distance(dist)} away, closest to {closest_index}')
 
-	await print_furthest_point_from_poly(point_set, point_set.envelope, session, 'own bounding box')
 	await print_furthest_point_from_poly(
 		point_set, point_set.convex_hull, session, 'own convex hull'
 	)
@@ -266,7 +275,7 @@ async def main() -> None:
 	output_args.add_argument(
 		'--antipodes-path',
 		type=Path,
-		help='Optionally output antipodes of each pic to here (as a table)',
+		help='Optionally output antipodes of each pic to here (can be geojson, etc)',
 	)
 	output_args.add_argument(
 		'--convex-hull-path',
@@ -277,6 +286,12 @@ async def main() -> None:
 		'--concave-hull-path',
 		type=Path,
 		help='Optionally output concave hull of all pics to here (can be geojson, etc)',
+	)
+	output_args.add_argument(
+		'--output-path',
+		'--centre-points-path',
+		type=Path,
+		help='Optionally output all centres and other point-related stats here (geojson, etc)',
 	)
 
 	argparser.add_argument(
@@ -354,7 +369,7 @@ async def main() -> None:
 
 	antipoints = get_point_antipodes(geo)
 	if args.antipodes_path:
-		antipodes_gdf = geopandas.GeoDataFrame(
+		antipodes_gdf = GeoDataFrame(
 			{'name': geo.index.to_list()}, geometry=antipoints, crs=geo.crs
 		)
 		print(antipodes_gdf)
@@ -366,6 +381,11 @@ async def main() -> None:
 	stats = get_point_set_stats(
 		point_set, find_geomedian=args.geomedian, find_antipoint=args.antipoint
 	)
+	if args.output_path:
+		points = stats.centres | stats.antipoints
+		points_gdf = GeoSeries(points, crs=point_set.gdf.crs).rename_axis('name').reset_index()
+		assert isinstance(points_gdf, GeoDataFrame), f'points_gdf was {type(points_gdf)}'
+		await asyncio.to_thread(output_geodataframe, points_gdf, args.output_path)
 
 	polygon_path: Path | None = args.polygon_path
 	polygon_name = polygon = None
@@ -381,6 +401,7 @@ async def main() -> None:
 		print('-' * 10)
 		print_extents(stats)
 		if args.antipoint:
+			# TODO: Finding points in own bounding box etc needs to go in PointSetStats
 			print('-' * 10)
 			await print_furthest_points(point_set, stats, sesh)
 

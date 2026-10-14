@@ -124,7 +124,7 @@ def get_stats(
 				row['Closest to antipoint'] = point_set[stats.antipoint_closest]
 			# centres
 			row.update(stats.centres)
-			row['Antipoint'] = stats.antipoint
+			row.update(stats.antipoints)
 			row['Main TPG?'] = 'World TPG' in game_names
 			row['Known games'] = ', '.join(sorted(game_names))
 			data[point_set.name] = row
@@ -228,7 +228,7 @@ def main() -> None:
 	)
 
 	if points_path:
-		points_path.mkdir()
+		points_path.mkdir(exist_ok=True, parents=True)
 		for geom_col in tqdm(geom_cols, desc='Outputting geometries', unit='column'):
 			gdf = GeoDataFrame(df[['name', geom_col]], geometry=geom_col, crs='wgs84')
 			# maybe we could include associated columns? Like "Most submitted" has "Most submitted count", "Antipoint" has "Distance to antipoint", etc
