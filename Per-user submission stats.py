@@ -128,6 +128,7 @@ def get_stats(
 
 			if stats.antipoint_closest is not None:
 				row['Closest to antipoint'] = point_set[stats.antipoint_closest]
+			row['Closest to antipode of circular mean'] = point_set[stats.anticircmean_closest]
 			# centres
 			row.update(stats.centres)
 			row.update(stats.antipoints)
@@ -223,6 +224,9 @@ def main() -> None:
 	dubious_cols = ['Diagonal distance of bounding box']
 	"""Don't care for this being in the stats because it's a bit silly"""
 	stats = df.drop(columns=dubious_cols)
+	stats['Graticule density'] = stats['# unique pics'] / stats['# graticules']
+	if 'Region count' in stats:
+		stats['Region density'] = stats['# unique pics'] / stats['Region count']
 	for geom_col in geom_cols:
 		if geom_col in stats:
 			stats[geom_col] = format_points(stats[geom_col])
@@ -237,6 +241,7 @@ def main() -> None:
 				'Total distance from centroid',
 				'Maximum distance from centroid',
 				'Distance to antipoint',
+				'Distance to antipode of circular mean',
 			),
 			area_cols=('Bounding box area', 'Convex hull area', 'Concave hull area'),
 		)
