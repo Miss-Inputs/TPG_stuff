@@ -91,12 +91,7 @@ def get_simulation(
 			order[round_name] = r.number
 	elif targets_path:
 		targets = load_with_auto_index(targets_path, None)
-		# Should we log about stuff that isn't a Point?
-		rounds = {
-			str(index): point
-			for index, point in targets.points.items()
-			if isinstance(point, shapely.Point)
-		}
+		rounds = {str(index): point for index, point in targets.items()}
 	elif num_random_rounds:
 		if region is not None:
 			# TODO: This wants a random seed argument

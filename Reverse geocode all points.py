@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import pandas
 from aiohttp import ClientSession
 from geopandas import GeoDataFrame
-from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import PointSet, output_geodataframe
@@ -22,22 +21,16 @@ from lib.reverse_geocode import reverse_geocode_gadm_address
 from lib.settings import Settings
 
 if TYPE_CHECKING:
-	from shapely.geometry.base import BaseGeometry
+	from shapely import Point
 
 
 async def _get_row_address(
 	session: ClientSession,
 	index: Hashable,
-	geometry: 'BaseGeometry',
+	geometry: 'Point',
 	endpoint: str | None,
 	language: str | None,
 ):
-	if not isinstance(geometry, Point):
-		# Feels like it'd be a bit annoying to raise an error here so I'll just pretend it was a point all along
-		tqdm.write(
-			f'Note: Index {index} was {type(geometry)}, not Point, converting with representative_point()'
-		)
-		geometry = geometry.representative_point()
 	return index, await get_address_nominatim(geometry.y, geometry.x, session, language, endpoint)
 
 
@@ -55,7 +48,7 @@ async def get_addresses(
 					_get_row_address(sesh, index, geometry, endpoint, language),
 					name=f'reverse_geocode {index}',
 				)
-				for index, geometry in point_set.points.items()
+				for index, geometry in point_set.items()
 			]
 			results = dict(
 				[
@@ -65,9 +58,7 @@ async def get_addresses(
 			)
 		else:
 			results = {}
-			with tqdm(
-				point_set.points.items(), 'Reverse geocoding', point_set.count, unit='row'
-			) as t:
+			with tqdm(point_set.items(), 'Reverse geocoding', point_set.count, unit='row') as t:
 				for index, geometry in t:
 					t.set_postfix(index=index)
 					_index, address = await _get_row_address(
@@ -84,12 +75,9 @@ async def get_components(point_set: PointSet, endpoint: str | None, language: st
 		user_agent = f'{user_agent} (user specified endpoint)'
 	async with ClientSession(headers={'User-Agent': user_agent}) as sesh:
 		results = {}
-		with tqdm(point_set.points.items(), 'Reverse geocoding', point_set.count, unit='row') as t:
+		with tqdm(point_set.items(), 'Reverse geocoding', point_set.count, unit='row') as t:
 			for index, geometry in t:
 				t.set_postfix(index=index)
-				if not isinstance(geometry, Point):
-					tqdm.write(f'{index} was not a Point but instead {type(geometry)}, ignoring')
-					continue
 				response = await get_address_components_nominatim(
 					geometry.y, geometry.x, sesh, language, endpoint
 				)

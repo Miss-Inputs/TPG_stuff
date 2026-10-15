@@ -214,10 +214,7 @@ async def eval_with_rounds(
 				# Unless we just won the round
 				if new_rank == 1:
 					continue
-				new_current_point = current_points.points[current_best]  # ty:ignore[invalid-argument-type] #indexer should support Hashable
-				assert isinstance(new_current_point, Point), (
-					f'new_current_point was {type(new_current_point)}, expected Point, this should not be loaded that way'
-				)
+				new_current_point = current_points[current_best]
 				current_diff = find_new_next_highest_distance(
 					r,
 					name,

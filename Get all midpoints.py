@@ -7,7 +7,7 @@ import logging
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import geopandas
 from shapely import Point
@@ -16,9 +16,6 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.util import geod_distance, get_midpoint, get_midpoint_centre, output_geodataframe
 
 from lib.io_utils import load_point_set_from_arg
-
-if TYPE_CHECKING:
-	from travelpygame.point_set import PointSet
 
 logger = logging.getLogger(Path(__file__).stem)
 
@@ -37,21 +34,6 @@ def get_row_midpoint(
 	)
 	name = f'{name_1} + {name_2}'
 	return {'geometry': midpoint, 'name': name}
-
-
-def _ensure_only_points(point_set: 'PointSet') -> list[ItemType]:
-	a: list[ItemType] = []
-	for name, point in point_set.points.items():
-		if not isinstance(point, Point):
-			logger.warning(
-				'Ignoring row %s in %s which was a %s and not a Point',
-				name,
-				point_set.name,
-				type(point),
-			)
-		else:
-			a.append((name, point))
-	return a
 
 
 async def main() -> None:
@@ -81,10 +63,10 @@ async def main() -> None:
 	args = argparser.parse_args()
 
 	ps_1 = await load_point_set_from_arg(args.point_set)
-	points_1 = _ensure_only_points(ps_1)
+	points_1 = list(ps_1.items())
 	if args.point_set_2:
 		ps_2 = await load_point_set_from_arg(args.point_set_2)
-		points_2 = _ensure_only_points(ps_2)
+		points_2 = list(ps_2.items())
 		total = len(points_1) * len(points_2)
 		combinations = itertools.product(points_1, points_2)
 	else:
