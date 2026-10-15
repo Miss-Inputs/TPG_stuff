@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from argparse import ArgumentParser, BooleanOptionalAction
+from argparse import ArgumentParser
 from collections import Counter
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from travelpygame.util import maybe_set_index_name_col, read_geodataframe_async
 from lib.io_utils import load_point_set_from_arg
 
 
-def print_counts(counter: Counter, *, print_most_visited: bool):
+def print_counts(counter: Counter, print_most_visited: int):
 	counts = Series(counter)
 
 	is_visited = counts > 0
@@ -25,7 +25,9 @@ def print_counts(counter: Counter, *, print_most_visited: bool):
 	if print_most_visited:
 		visited = counts[is_visited].sort_values(ascending=False)
 		print('Most visited regions:')
-		print(visited.head(10))
+		if print_most_visited > 0:
+			visited = visited.head(print_most_visited)
+		print(visited)
 
 	if is_visited.all():
 		print('You have visited every region! 🎉🎉🎉')
@@ -98,9 +100,9 @@ async def main() -> None:
 
 	argparser.add_argument(
 		'--print-most-visited',
-		action=BooleanOptionalAction,
-		default=True,
-		help='Print your most visited regions (which regions appear most often in your point set). Defaults to true.',
+		type=int,
+		default=10,
+		help='Print your most visited regions (which regions appear most often in your point set). Specify an int to print the top N regions (defaults to 10), a negative number to display all regions in order of most visited, or 0 to disable.',
 	)
 
 	args = argparser.parse_args()
