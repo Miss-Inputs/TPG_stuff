@@ -42,20 +42,24 @@ def filter_point_set(
 	return point_set
 
 
-def add_filter_args(argparser: ArgumentParser | ArgumentGroup):
-	"""Adds two arguments --filter and --exclude to an argument parser or group."""
+def add_filter_args(argparser: ArgumentParser | ArgumentGroup, name: str | None = None):
+	"""Adds two arguments --filter and --exclude to an argument parser or group.
+	Arguments:
+		name: What the thing you are filtering is called, if None, it will be "the input".
+	"""
 	# TODO: There might be a way to have custom ArgumentParser actions that result in this producing a list of 2-length tuples instead of a list of lists, which is then nicer to type hint and prevents mistakes better
+	name = name or 'the input'
 	argparser.add_argument(
 		'--filter',
 		action='append',
 		nargs=2,
 		metavar=('field', 'value'),
-		help='Filters the input to only rows matching a certain value, as (field name) == (value). Multiple pairs of field/value can be specified multiple times to restrict to rows matching _all_ filters',
+		help=f'Filters {name} to only rows matching a certain value, as (field name) == (value). Multiple pairs of field/value can be specified multiple times to restrict to rows matching _all_ filters',
 	)
 	argparser.add_argument(
 		'--exclude',
 		action='append',
 		nargs=2,
 		metavar=('field', 'value'),
-		help='Filters the input to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
+		help=f'Filters {name} to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
 	)

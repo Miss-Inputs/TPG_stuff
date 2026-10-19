@@ -38,6 +38,7 @@ from travelpygame.util import (
 	output_dataframe,
 )
 
+from lib.arg_utils import add_filter_args, filter_point_set
 from lib.io_utils import load_point_set_from_arg, load_point_set_from_path
 
 
@@ -55,10 +56,7 @@ def get_distances(
 
 
 def get_where_pics_better(
-	points: PointSet,
-	new_points: PointSet,
-	targets: geopandas.GeoDataFrame,
-	distance_method: DistanceMethod,
+	points: PointSet, new_points: PointSet, targets: PointSet, distance_method: DistanceMethod
 ) -> pandas.DataFrame:
 	"""Just calls new_pic_eval.find_if_new_pics_better but filters the result to only rows where the new points are better."""
 	results = find_if_new_pics_better(points, new_points, targets, distance_method)
@@ -94,7 +92,7 @@ async def _eval_targets_all(
 	distance_method: DistanceMethod,
 	output_path: Path | None,
 ):
-	better = get_where_pics_better(points, new_points, targets.gdf, distance_method)
+	better = get_where_pics_better(points, new_points, targets, distance_method)
 	print('Number of times each pic was better (with all new pics at once):')
 	better_count = (
 		better['new_best']
@@ -290,6 +288,9 @@ async def eval_with_rounds(
 
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
+	new_points_args = argparser.add_argument_group(
+		'New points args', 'Arguments relating to new_points'
+	)
 	target_args = argparser.add_argument_group(
 		'Target args', 'Select which targets/rounds to test against'
 	)
@@ -327,6 +328,8 @@ async def main() -> None:
 		help='Distance calculation method, defaults to haversine for consistency with main TPG',
 		default='haversine',
 	)
+
+	add_filter_args(new_points_args, 'new_points')
 
 	target_args.add_argument(
 		'--targets',
@@ -383,6 +386,7 @@ async def main() -> None:
 	points = await load_point_set_from_arg(args.existing_points, force_wgs84=True)
 	new_points_path: Path = args.new_points
 	new_points = await load_point_set_from_path(new_points_path, force_wgs84=True)
+	new_points = filter_point_set(new_points, args.filter, args.exclude)
 
 	distance_method = DistanceMethod(args.distance_method)
 	# TODO: Default to haversine if and only if using rounds instead of targets
