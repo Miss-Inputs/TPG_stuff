@@ -123,14 +123,17 @@ def print_extreme_points(stats: PointSetStats):
 		print(
 			f'Closest point to furthest away point: {stats.antipoint_closest}, {format_distance(stats.antipoint_dist)} away'
 		)
+	print(f'Closest point to antipode of circular mean: {stats.anticircmean_closest}')
 
 
-def print_extents(stats: PointSetStats):
+def print_extents(ps: 'PointSet', stats: PointSetStats):
 	for name, distance in stats.distance_extents.items():
 		print(f'{name}: {format_distance(distance)}')
 	for name, area in stats.area_extents.items():
 		print(f'{name}: {format_area(area)}')
-	print(f'Number of graticules visited: {format_number(stats.num_graticles)}')
+	print(
+		f'Number of graticules visited: {format_number(stats.num_graticles)} (density: {ps.count / stats.num_graticles} pics per graticule)'
+	)
 	print(f'Latitude range: {format_number(stats.latitude_range, 12)}°')
 	print(f'Longitude range: {format_number(stats.longitude_range, 12)}°')
 
@@ -383,9 +386,13 @@ async def main() -> None:
 	)
 	if args.output_path:
 		points = stats.centres | stats.antipoints
+		points['Closest to antipode of circular mean'] = point_set[stats.anticircmean_closest]
 		points_gdf = GeoSeries(points, crs=point_set.gdf.crs).rename_axis('name').reset_index()
 		assert isinstance(points_gdf, GeoDataFrame), f'points_gdf was {type(points_gdf)}'
 		await asyncio.to_thread(output_geodataframe, points_gdf, args.output_path)
+
+	print_extents(point_set, stats)
+	print_extreme_points(stats)
 
 	polygon_path: Path | None = args.polygon_path
 	polygon_name = polygon = None
@@ -395,11 +402,9 @@ async def main() -> None:
 
 	use_reverse_geocode: bool = args.reverse_geocode
 	async with ClientSession() if use_reverse_geocode else nullcontext() as sesh:
-		print_extreme_points(stats)
 		print('-' * 10)
 		await print_centre_points(point_set, stats, sesh)
 		print('-' * 10)
-		print_extents(stats)
 		if args.antipoint:
 			# TODO: Finding points in own bounding box etc needs to go in PointSetStats
 			print('-' * 10)
