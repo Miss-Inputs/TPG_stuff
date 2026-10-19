@@ -31,8 +31,8 @@ from travelpygame.util import (
 	summarize_counter,
 )
 
+from lib.arg_utils import add_filter_args, filter_gdf
 from lib.format_utils import describe_point
-from lib.io_utils import filter_gdf
 from lib.stats import get_longest_distance_from_point
 
 
@@ -168,20 +168,7 @@ async def main() -> None:
 		type=Path,
 		help='GeoJSON (or GeoPackage, etc) file to draw random point(s) from. Must contain polygons or multipolygons, for now',
 	)
-	input_args.add_argument(
-		'--filter',
-		action='append',
-		nargs=2,
-		metavar=('field', 'value'),
-		help='Filters the input to only rows matching a certain value, as (field name) == (value). Multiple pairs of field/value can be specified multiple times to restrict to rows matching _all_ filters',
-	)
-	input_args.add_argument(
-		'--exclude',
-		action='append',
-		nargs=2,
-		metavar=('field', 'value'),
-		help='Filters the input to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
-	)
+	add_filter_args(input_args)
 
 	gen_args.add_argument(
 		'-n',

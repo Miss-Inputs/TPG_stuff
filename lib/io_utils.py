@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Collection, Hashable, Sequence
+from collections.abc import Collection, Hashable
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -203,21 +203,6 @@ async def load_point_set_from_path(
 	if to_drop:
 		gdf = gdf.drop(index=list(to_drop))
 	return PointSet(gdf, name, projected_crs_arg)
-
-
-def filter_gdf(
-	gdf: 'GeoDataFrame',
-	include_args: list[Sequence[str]] | None = None,
-	exclude_args: list[Sequence[str]] | None = None,
-) -> 'GeoDataFrame':
-	if include_args:
-		for field, value in include_args:
-			gdf = gdf[gdf[field] == value]
-	if exclude_args:
-		for field, value in exclude_args:
-			gdf = gdf[gdf[field] != value]
-	return gdf
-
 
 async def load_point_set_from_arg(
 	path_or_name: str,
