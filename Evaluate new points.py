@@ -13,7 +13,6 @@ from pandas import DataFrame, Index
 from shapely import Point
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from travelpygame import PointSet, load_rounds_async
 from travelpygame.best_pics import get_worst_target
 from travelpygame.new_pic_eval import (
 	find_if_new_pics_better,
@@ -22,11 +21,13 @@ from travelpygame.new_pic_eval import (
 	load_points_or_rounds,
 	new_distance_rank,
 )
+from travelpygame.point_set import PointSet, get_visited_graticules
 from travelpygame.submission_comparison import (
 	SubmissionDifference,
 	compare_player_in_round,
 	find_new_next_highest_distance,
 )
+from travelpygame.tpg_data import load_rounds_async
 from travelpygame.util import (
 	DistanceMethod,
 	find_first_geom_index,
@@ -286,6 +287,19 @@ async def eval_with_rounds(
 	print(format_dataframe(grouped, ('total_diff', 'mean_diff', 'max_diff')))
 
 
+def eval_new_graticules(points: PointSet, new_points: PointSet):
+	grats = get_visited_graticules(points)
+	new_points_grats = get_visited_graticules(new_points)
+	new_grats = new_points_grats - grats
+
+	points_in_new = {}
+	for index, point in new_points.items():
+		t = (int(point.y), int(point.x))
+		if t in new_grats:
+			points_in_new[index] = t
+	print(pandas.Series(points_in_new))
+
+
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	new_points_args = argparser.add_argument_group(
@@ -436,6 +450,8 @@ async def main() -> None:
 			args.rounds_output_path,
 			distance_method,
 		)
+
+	eval_new_graticules(points, new_points)
 
 
 if __name__ == '__main__':
