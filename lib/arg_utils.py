@@ -1,10 +1,12 @@
 """Common reused arguments and handlers for them"""
 
+import re
 from argparse import ArgumentParser
 from argparse import _ArgumentGroup as ArgumentGroup
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from shapely import Point
 from travelpygame.point_set import PointSet
 
 if TYPE_CHECKING:
@@ -63,3 +65,10 @@ def add_filter_args(argparser: ArgumentParser | ArgumentGroup, name: str | None 
 		metavar=('field', 'value'),
 		help=f'Filters {name} to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
 	)
+
+
+def parse_coords(s: str) -> Point:
+	lat_s, lng_s = re.split(r'[,\s/;]\s*', s, maxsplit=1)
+	lat = float(lat_s)
+	lng = float(lng_s)
+	return Point(lng, lat)

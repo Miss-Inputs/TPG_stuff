@@ -3,7 +3,6 @@
 
 import asyncio
 import logging
-import re
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections.abc import Collection
 from datetime import datetime
@@ -38,6 +37,7 @@ from travelpygame.util import (
 	try_auto_set_index,
 )
 
+from lib.arg_utils import parse_coords
 from lib.io_utils import load_or_fetch_point_sets, load_point_sets_from_folder
 from lib.settings import Settings
 
@@ -231,13 +231,6 @@ async def load_point_sets(
 	if not point_sets:
 		raise RuntimeError('Nobody is able to be simulated')
 	return point_sets
-
-
-def parse_coords(s: str) -> shapely.Point:
-	lat_s, lng_s = re.split(r'[,\s/;]\s*', s, maxsplit=1)
-	lat = float(lat_s)
-	lng = float(lng_s)
-	return shapely.Point(lng, lat)
 
 
 def simulate_single_round(sim: Simulation, output_path: Path | None, name: str | None):
