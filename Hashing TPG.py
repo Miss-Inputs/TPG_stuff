@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 from travelpygame.hashing import grid_search_point, josh_hash, josh_hash_point, random_search_point
 from travelpygame.util import DistanceMethod, format_dataframe, output_geodataframe
 
-from lib.arg_utils import parse_coords
+from lib.arg_utils import parse_box, parse_coords
 from lib.io_utils import load_point_set_from_arg
 
 if TYPE_CHECKING:
@@ -80,6 +80,7 @@ def solve(
 	target: 'Point',
 	threshold: float | None,
 	random_limit: int | None,
+	bbox: tuple[float, float, float, float] | None,
 	output_path: Path | None,
 	*,
 	use_random: bool,
@@ -87,15 +88,15 @@ def solve(
 	# TODO: These should be parameters
 	distance_method = DistanceMethod.Haversine
 	grid_size = 1e-4
-	early_return = True
+	early_return = False
 
 	if use_random:
 		points = random_search_point(
-			target, threshold, distance_method, random_limit, 5, early_return=early_return
+			target, threshold, distance_method, random_limit, 5, bbox, early_return=early_return
 		)
 	else:
 		points = grid_search_point(
-			target, threshold, distance_method, grid_size, 5, early_return=early_return
+			target, threshold, distance_method, grid_size, 5, bbox, early_return=early_return
 		)
 	if not points:
 		print('No points were found with the given search parameters. Bummer')
@@ -141,6 +142,17 @@ def main() -> None:
 		type=int,
 		help='Amount of random points to generate before giving up. If not set, keeps generating coordinates forever until something is found.',
 	)
+	solve_args.add_argument(
+		'--search-mode',
+		choices=['random', 'grid'],
+		default='random',
+		help='Method of finding points, can be random (default) to generate random coords or grid to search over a fixed grid of coords',
+	)
+	solve_args.add_argument(
+		'--bbox',
+		type=parse_box,
+		help='Optionally only look for coordinates inside this bbox, specified as comma-separated minx/miny/maxx/maxy',
+	)
 	argparser.add_argument(
 		'--output-path',
 		'--out-path',
@@ -152,8 +164,14 @@ def main() -> None:
 	if args.path:
 		convert_point_set(args.path, args.output_path)
 	elif args.solve:
-		# TODO: Search mode parameter, etc
-		solve(args.solve, args.threshold, args.limit, args.output_path, use_random=True)
+		solve(
+			args.solve,
+			args.threshold,
+			args.limit,
+			args.bbox,
+			args.output_path,
+			use_random=args.search_mode == 'random',
+		)
 	else:
 		check_stuff()
 

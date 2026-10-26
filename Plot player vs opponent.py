@@ -23,6 +23,7 @@ from travelpygame.util.point_construction import (
 	get_spaced_grid,
 )
 
+from lib.arg_utils import parse_box
 from lib.io_utils import load_point_set_from_arg
 
 if TYPE_CHECKING:
@@ -231,7 +232,7 @@ async def main() -> None:
 	if bbox_arg in {'max', 'min'}:
 		bbox = bbox_arg
 	elif bbox_arg:
-		bbox = [float(part.strip()) for part in bbox_arg.split(',')]
+		bbox = parse_box(bbox_arg)
 
 	grid = get_grid(
 		left_player, right_player, args.resolution, bbox, args.amount, use_boxes=use_boxes

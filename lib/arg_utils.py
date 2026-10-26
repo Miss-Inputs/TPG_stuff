@@ -66,9 +66,15 @@ def add_filter_args(argparser: ArgumentParser | ArgumentGroup, name: str | None 
 		help=f'Filters {name} to only rows _not_ matching a certain value, as (field name) != (value). Multiple pairs of field/value can be specified multiple times to exclude rows matching any filter',
 	)
 
+comma_splitter = re.compile(r'[,\s/;]\s*')
 
 def parse_coords(s: str) -> Point:
-	lat_s, lng_s = re.split(r'[,\s/;]\s*', s, maxsplit=1)
+	lat_s, lng_s = comma_splitter.split( s, maxsplit=1)
 	lat = float(lat_s)
 	lng = float(lng_s)
 	return Point(lng, lat)
+
+
+def parse_box(s: str) -> tuple[float, float, float, float]:
+	minx, miny, maxx, maxy = comma_splitter.split( s, maxsplit=3)
+	return (float(minx), float(miny), float(maxx), float(maxy))
