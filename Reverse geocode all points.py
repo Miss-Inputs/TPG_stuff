@@ -14,7 +14,12 @@ from geopandas import GeoDataFrame
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame import PointSet, output_geodataframe
-from travelpygame.reverse_geocode import get_address_components_nominatim, get_address_nominatim
+from travelpygame.reverse_geocode import (
+	get_address_components_nominatim,
+	get_address_nominatim,
+	reverse_geocode_regions_multiple,
+)
+from travelpygame.util import first_unique_column_label, read_geodataframe_async
 
 from lib.io_utils import load_point_set_from_arg
 from lib.reverse_geocode import reverse_geocode_gadm_address
@@ -30,13 +35,13 @@ async def _get_row_address(
 	geometry: 'Point',
 	endpoint: str | None,
 	language: str | None,
-):
+) -> tuple[Hashable, str | None]:
 	return index, await get_address_nominatim(geometry.y, geometry.x, session, language, endpoint)
 
 
 async def get_addresses(
 	point_set: PointSet, endpoint: str | None, language: str | None, *, parallel: bool
-):
+) -> pandas.Series:
 	user_agent = 'https://github.com/Miss-Inputs/TPG_stuff'
 	if endpoint:
 		user_agent = f'{user_agent} (user specified endpoint)'
@@ -69,7 +74,9 @@ async def get_addresses(
 	return pandas.Series(results)
 
 
-async def get_components(point_set: PointSet, endpoint: str | None, language: str | None):
+async def get_components(
+	point_set: PointSet, endpoint: str | None, language: str | None
+) -> pandas.DataFrame:
 	user_agent = 'https://github.com/Miss-Inputs/TPG_stuff'
 	if endpoint:
 		user_agent = f'{user_agent} (user specified endpoint)'
@@ -99,11 +106,25 @@ async def get_components(point_set: PointSet, endpoint: str | None, language: st
 	return df.dropna(how='all', axis='columns')
 
 
+async def reverse_geocode_local(
+	point_set: PointSet, region_path: Path, col_names: list[str] | None
+) -> pandas.DataFrame:
+	regions = await read_geodataframe_async(region_path)
+	if not col_names:
+		first_unique = first_unique_column_label(regions)
+		if first_unique:
+			col_names = [str(first_unique)]
+
+	df = reverse_geocode_regions_multiple(point_set.points, regions, col_names)
+	return df.rename(columns={'name': 'region_name'}) if 'name' in df.columns else df
+
+
 async def main() -> None:
 	argparser = ArgumentParser(description=__doc__)
 	point_set_args = argparser.add_argument_group('Point set arguments')
 	output_args = argparser.add_argument_group('Output arguments')
 	web_args = argparser.add_argument_group('Web service arguments')
+	local_file_args = argparser.add_argument_group('Local file arguments', 'For --mode local')
 
 	point_set_args.add_argument(
 		'point_set',
@@ -111,9 +132,9 @@ async def main() -> None:
 	)
 	argparser.add_argument(
 		'--mode',
-		choices=('address', 'components', 'gadm', 'null'),
+		choices=('address', 'components', 'gadm', 'local', 'null'),
 		default='address',
-		help='Can be address (default) to get the address, components to add each individual component of the address (country/state/etc) as columns, gadm to use GADM if configured in settings (a bit janky for now), or null to skip reverse geocoding and just copy the point set',
+		help='Can be address (default) to get the address, components to add each individual component of the address (country/state/etc) as columns, gadm to use GADM if configured in settings (a bit janky for now), local to use a local file with --local-file and --column, or null to skip reverse geocoding and just copy the point set',
 	)
 	output_args.add_argument(
 		'--output-path',
@@ -121,7 +142,7 @@ async def main() -> None:
 		help='Optional path to write a file (.csv, .xlsx, etc) with the results',
 	)
 	output_args.add_argument(
-		'--column-name',
+		'--out-column-name',
 		help='Name of column with the results, defaults to "address"',
 		default='address',
 	)
@@ -153,7 +174,12 @@ async def main() -> None:
 		'--crs', default='wgs84', help='Coordinate reference system to use, defaults to WGS84'
 	)
 
-	# TODO: We want an option here to reverse geocode locally from a geofile (would need a name column option too)
+	local_file_args.add_argument('--local-file', type=Path, help='Path to file containing regions')
+	local_file_args.add_argument(
+		'--column',
+		nargs='*',
+		help='Column name in file containing the desired address component(s), can be specified multiple times, if not specified will attempt to autodetect',
+	)
 
 	args = argparser.parse_args()
 	output_path: Path | None = args.output_path
@@ -165,16 +191,22 @@ async def main() -> None:
 	if args.mode == 'address':
 		addresses = await get_addresses(point_set, args.endpoint, args.language, parallel=False)
 		print(addresses)
-		gdf[args.column_name] = addresses
+		gdf[args.out_column_name] = addresses
 	elif args.mode == 'gadm':
 		addresses = await asyncio.to_thread(
 			reverse_geocode_gadm_address, point_set, 3, {}, Settings()
 		)
 		print(addresses)
-		gdf[args.column_name] = addresses
+		gdf[args.out_column_name] = addresses
 		# TODO: Mode for GADM components, I guess
 	elif args.mode == 'components':
 		components = await get_components(point_set, args.endpoint, args.language)
+		print(components)
+		gdf = pandas.concat((gdf, components), axis='columns').reset_index(names='name')
+		assert isinstance(gdf, GeoDataFrame), f'why is gdf {type(gdf)}'
+	elif args.mode == 'local':
+		# TODO: Should probably just set mode = local implicitly if --local-file is provided as an argument
+		components = await reverse_geocode_local(point_set, args.local_file, args.column)
 		print(components)
 		gdf = pandas.concat((gdf, components), axis='columns').reset_index(names='name')
 		assert isinstance(gdf, GeoDataFrame), f'why is gdf {type(gdf)}'
