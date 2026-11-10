@@ -17,6 +17,7 @@ The phrase "TPG area" or "defined area" refers to the part of the world that rou
 Things to help you actually play the game.
 
 - Get all midpoints: Intended for Team TPG, finds every possible midpoint between all of your points and a teammate's points.
+- Get elevation from DEM: Given your point set, and a .tiff file or whatever representing a DEM (digital elevation model), finds the elevation of your points (where the DEM has that data). Elevation is not used in TPG except in some spinoffs, but maybe you might like to add that as a column for funsies, or you just like to know.
 - Get point set from submissions: Gets all points submitted from a particular player, optionally using a specific TPG data file or getting main TPG data. Useful for getting your own points if you don't have a list already, a teammate's points for Team TPG, or an opponent's points for Gauntlet TPG/TPG League/TPG Tournament/etc.
 - Plot player vs opponent: Plots a map with colours indicating who wins out of you or an opponent (for TPG League).
 - Reverse geocode all points: Given a point set with no or incomplete name/description, uses a Nominatim mirror to find the address for each point, and optionally saves the file to .csv or .geojson or whichever else. (The reverse geocoding is not in travelpygame at this point in time, and probably should be.) (The mirror endpoint might not work sometimes.)
@@ -25,6 +26,7 @@ Things to help you actually play the game.
 
 Things to get stats for you/your point set, which may be useful, or may be just interesting.
 
+- Get best pic: WIP, but would replace "Get best pic for points" below, and potentially target polygons (regions) as well as points
 - Get best pic for points: Given a target point set, finds your closest point in your point set for each one.
 - Point set stats: Outputs some info about your point set, such as average/central location, or furthest possible point on the earth.
 - Plot player distances: Plots a map coloured in by best possible distance from a point set.
@@ -39,10 +41,10 @@ Things to help figure out where to actually go in real life so you can have a be
 
 ### For TPG spinoff runners
 
-- Convert submission tracker: Converts kml/kmz file(s) from a submission tracker (or several, if a season needs multiple trackers) hosted on Google My Maps to a TPG data file, for easier use with everything else.
+- Convert submission tracker: Converts kml/kmz file(s) from a submission tracker (or several, if a season needs multiple trackers) hosted on Google My Maps to a TPG data file, for easier use with everything else. (Unused these days, needs to support Cellery standard formats if it wants to be useful in the modern era)
 - Generate random location: Given a .geojson/.gpkg/etc file containing a TPG area, picks out a random point somewhere in that area, or optionally multiple points, and optionally prints some stats.
 - Score multi-target CSV: Quick and dirty scorer for a TPG spinoff with multiple targets, using a CSV that has lat/lng and also target_lat/target_lng columns.
-- Score submissions: Takes TPG data files or exported submission trackers, calculates distances and scores according to options, saves as a TPG data file containing scores, outputs leaderboards, and prints submission reminders.
+- Score submissions: Takes TPG data files or exported submission trackers, calculates distances and scores according to options, saves as a TPG data file containing scores, outputs leaderboards, and prints submission reminders. Not maintained as much now that Cellery's hosting tools exist.
 
 ### For TPG spinoff runners (stats)
 
@@ -56,26 +58,25 @@ Things to help figure out where to actually go in real life so you can have a be
 
 ### Other stats (that may or may not be interesting)
 
-- Custom travel map: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
 - Find submission clusters: Find points in all submissions that are clustered together, or those that are not.
 - Furthest away points from anyone: Find points that are as far away as possible from any submission by anyone.
 - Most unique pics: Finds pics that are far away from anyone else's pics.
 - Most used pics for each user: Finds pics that are used the most for each player.
-- Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is. NOTE: This currently needs reworking and also just saves files into /tmp instead of anywhere sensible or configurable.
+- Per-user submission stats: Gets some stats for each player in TPG data, such as their furthest possible point and how far away that is.
 - Plot user submissions: Plots rounds and submissions and arrows from the submission to the round, given TPG data and a player name. NOTE: This currently needs rewriting and also hardcodes some stuff.
 - Point set similarity: Finds similarity between two point sets, or one point set and every other player, or every combination of players (along with everyone's most similar player)
-
-### Unsorted
-
-- Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else.
-- Get elevation from DEM: Given your point set, and a .tiff file or whatever representing a DEM (digital elevation model), finds the elevation of your points (where the DEM has that data). Elevation is not used in TPG except in some hypothetical spinoffs, but maybe you might like to add that as a column for funsies.
+- Proximity network: Builds a network of players who have "met" each other by having submitted the same place.
+- Travel map of submissions: Plots a map of regions specified from an arbitrary geo file (.geojson/.gpkg/etc) with how many people have been to each one, according to TPG data.
 
 ### Unsorted and may be dismantled/deleted
 
 - Submission tracker to GeoJSON: Was probably just there for testing but should be using a TPG data file instead.
+- Get main TPG data: Gets main TPG data and optionally scores it (does so by default), for use with everything else. Not as such used anymore.
 
 ### One-off things which are just around if one desires to run them again
 
-- TPG wrapped.py: Used at the end of season 2 to generate nicely formatted stats for every player, which everyone liked.
+- Hashing TPG: For the H round of Alphabet TPG, hashes a point set and finds 5Ks that hash to the target. Could be reused for some other hashing thing in the future.
+- Most similar name: Gets the most similar name in a list of strings for each name in a point set, which was used for fun once.
+- TPG wrapped.py: Used at the end of season 2 to generate nicely formatted stats for every player, which everyone liked. I haven't bothered maintaining the code afterwards. Whoops.
 - More TPG stats.py: Some other stats requested by CG for the season 2 award ceremony.
 - Unique areas: Regions that have only had a pic submitted by one person. I think I was planning some spinoff here?
