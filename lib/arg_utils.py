@@ -40,7 +40,7 @@ def filter_point_set(
 	"""
 	if include_args or exclude_args:
 		gdf = filter_gdf(point_set.gdf, include_args, exclude_args)
-		point_set = PointSet(gdf, point_set.name, point_set.projected_crs)
+		point_set = PointSet(gdf, point_set.name, point_set.projected_crs_arg)
 	return point_set
 
 
