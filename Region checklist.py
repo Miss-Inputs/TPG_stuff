@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from collections import Counter
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from travelpygame.util import maybe_set_index_name_col, read_geodataframe_async
 from lib.io_utils import load_point_set_from_arg
 
 
-def print_counts(counter: Counter, print_most_visited: int):
+def print_counts(counter: Counter, print_most_visited: int, *, list_unvisited: bool):
 	counts = Series(counter)
 
 	is_visited = counts > 0
@@ -35,10 +35,11 @@ def print_counts(counter: Counter, print_most_visited: int):
 
 	completion = is_visited.mean()
 	print(f'Completion progress: {is_visited.sum()}/{counts.size} ({completion:%})')
-	unvisited = counts.index[counts == 0]
-	print('Not yet visited:')
-	for region in unvisited.sort_values():
-		print(region)
+	if list_unvisited:
+		unvisited = counts.index[counts == 0]
+		print('Not yet visited:')
+		for region in unvisited.sort_values():
+			print(region)
 
 
 async def main() -> None:
@@ -104,6 +105,12 @@ async def main() -> None:
 		default=10,
 		help='Print your most visited regions (which regions appear most often in your point set). Specify an int to print the top N regions (defaults to 10), a negative number to display all regions in order of most visited, or 0 to disable.',
 	)
+	argparser.add_argument(
+		'--list-remaining',
+		action=BooleanOptionalAction,
+		default=True,
+		help='Print all regions that you do not have a photo in. Defaults to true',
+	)
 
 	args = argparser.parse_args()
 	point_set = await load_point_set_from_arg(
@@ -134,7 +141,11 @@ async def main() -> None:
 			regions = regions.set_crs('wgs84')
 
 	region_counter = get_visited_regions(point_set, regions)
-	print_counts(region_counter, print_most_visited=args.print_most_visited)
+	print_counts(
+		region_counter,
+		print_most_visited=args.print_most_visited,
+		list_unvisited=args.list_remaining,
+	)
 
 
 if __name__ == '__main__':
