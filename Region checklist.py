@@ -12,6 +12,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from travelpygame.point_set import get_visited_regions
 from travelpygame.util import maybe_set_index_name_col, read_geodataframe_async
 
+from lib.arg_utils import add_filter_args, filter_point_set
 from lib.io_utils import load_point_set_from_arg
 
 
@@ -93,6 +94,7 @@ async def main() -> None:
 		'--metres-crs',
 		help='Projected coordinate reference system to use for some operations, autodetect (when needed) if not specified',
 	)
+	add_filter_args(point_set_args, 'the point set')
 
 	region_args.add_argument(
 		'--region-name-col',
@@ -122,6 +124,7 @@ async def main() -> None:
 		args.projected_crs,
 		force_unheadered=args.unheadered,
 	)
+	point_set = filter_point_set(point_set, args.filter, args.exclude)
 
 	regions_path: Path = args.regions
 	regions = await read_geodataframe_async(regions_path)
