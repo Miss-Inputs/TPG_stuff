@@ -66,12 +66,13 @@ def add_transformations(point_set: PointSet) -> PointSet:
 			name = repr(name)
 		# Include original point, since that is still valid
 		transformed[name] = point
-		# TODO: Include adding/removing/changing the digits after the decimal point, which is not that useful, so I didn't bother
+		# TODO: Include adding/removing the digits after the decimal point or changing any digits well after the 2nd decimal place, which is not that useful, so I didn't bother
 		for axis in ('lat', 'lng'):
 			for n in range(10):
-				new_point = change_coord(point, axis, change_digit, 1, n)
-				if is_point_valid(new_point, point):
-					transformed[f'{name} {axis} pos 1 to {n}'] = new_point
+				for pos in (1, -1, -2):
+					new_point = change_coord(point, axis, change_digit, pos, n)
+					if is_point_valid(new_point, point):
+						transformed[f'{name} {axis} pos {pos} to {n}'] = new_point
 			for n in range(-17, 18):
 				new_point = change_coord(point, axis, change_leading, n)
 				if is_point_valid(new_point, point):
