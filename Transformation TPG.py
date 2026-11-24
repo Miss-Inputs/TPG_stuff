@@ -67,6 +67,13 @@ def add_transformations(point_set: PointSet) -> PointSet:
 					point, axis, change_leading, n
 				)
 
+	# Reject invalid coords
+	transformed = {
+		name: point
+		for name, point in transformed.items()
+		if point.x >= -180 and point.x <= 180 and point.y >= -90 and point.y <= 90
+	}
+
 	gs = GeoSeries(transformed, crs='wgs84')
 	print(gs)
 	gdf = gs.to_frame()
