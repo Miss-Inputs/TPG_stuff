@@ -42,6 +42,16 @@ def change_coord(point: Point, axis: Literal['lat', 'lng'], func: Callable[..., 
 	return Point(func(point.x, *args), point.y)
 
 
+def is_point_valid(point: Point, existing: Point) -> bool:
+	return (
+		not point.equals_exact(existing, 1e-6)
+		and point.x >= -180
+		and point.x <= 180
+		and point.y >= -90
+		and point.y <= 90
+	)
+
+
 def add_transformations(point_set: PointSet) -> PointSet:
 	"""
 	Transformations:
@@ -59,20 +69,13 @@ def add_transformations(point_set: PointSet) -> PointSet:
 		# TODO: Include adding/removing/changing the digits after the decimal point, which is not that useful, so I didn't bother
 		for axis in ('lat', 'lng'):
 			for n in range(10):
-				transformed[f'{name} {axis} pos 1 to {n}'] = change_coord(
-					point, axis, change_digit, 1, n
-				)
+				new_point = change_coord(point, axis, change_digit, 1, n)
+				if is_point_valid(new_point, point):
+					transformed[f'{name} {axis} pos 1 to {n}'] = new_point
 			for n in range(-17, 18):
-				transformed[f'{name} {axis} leading to {n}'] = change_coord(
-					point, axis, change_leading, n
-				)
-
-	# Reject invalid coords
-	transformed = {
-		name: point
-		for name, point in transformed.items()
-		if point.x >= -180 and point.x <= 180 and point.y >= -90 and point.y <= 90
-	}
+				new_point = change_coord(point, axis, change_leading, n)
+				if is_point_valid(new_point, point):
+					transformed[f'{name} {axis} leading to {n}'] = new_point
 
 	gs = GeoSeries(transformed, crs='wgs84')
 	print(gs)
